@@ -1,0 +1,1 @@
+{"agentType":"workflow-subagent","isBuiltIn":true,"description":"build:tests","workflowPhase":"Build","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":false,"model":"sonnet","pickedEffortModel":"claude-opus-5-5"}

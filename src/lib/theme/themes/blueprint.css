@@ -1,0 +1,146 @@
+/* Blueprint theme. Generated from docs/ux-spec.md sections 4.5 and 4.7; edit the spec first.
+   Each block also matches a plain [data-theme] element, so previews (ThemeTile) can scope a theme. */
+
+:root[data-theme="blueprint"],
+[data-theme="blueprint"] {
+  --font-display: var(--font-mono);
+  --display-weight: 600;
+  --display-tracking: 0;
+  --label-transform: uppercase;
+  --label-tracking: 0.08em;
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 2px;
+  --radius-pill: 2px;
+  --border-width: 1px;
+  --border-width-strong: 1.5px;
+  --container-border-style: dashed;
+  --shadow-1: none;
+  --shadow-2: 0 0 0 1px var(--accent);
+  --shadow-3: 0 0 0 1px var(--border-strong), 0 0 0 4px var(--surface-app);
+  --canvas-pattern:
+    linear-gradient(var(--border-default) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-default) 1px, transparent 1px),
+    linear-gradient(var(--border-subtle) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px);
+  --canvas-pattern-size: 120px 120px, 120px 120px, 24px 24px, 24px 24px;
+  --node-fill: var(--surface-card);
+  --edge-width: 1px;
+}
+
+/* Blueprint, light. Closest pair of state colours: queued / idle, OKLab distance 0.104 */
+:root[data-theme="blueprint"][data-mode="light"],
+[data-theme="blueprint"][data-mode="light"] {
+  color-scheme: light;
+  --surface-app: #EEF3FA;
+  --surface-canvas: #E6EDF7;
+  --surface-panel: #F5F8FC;
+  --surface-card: #FFFFFF;
+  --surface-raised: #FFFFFF;
+  --surface-sunken: #DFE8F4;
+  --surface-hover: #E9F0F9;
+  --surface-selected: #D6E3F5;
+  --text-primary: #0B2447;
+  --text-secondary: #3A5278;
+  --text-muted: #506588;
+  --border-subtle: #D3DFEF;
+  --border-default: #B4C7E2;
+  --border-strong: #6381AE;
+  --accent: #0B4FB3;
+  --accent-hover: #093F90;
+  --accent-soft: #D6E3F5;
+  --accent-text: #0B4FB3;
+  --text-on-accent: #FFFFFF;
+  --focus-ring: #0B4FB3;
+  --select-ring: #0B2447;
+  --shadow-color: #0B2447;
+  --state-queued: #A17904;
+  --state-queued-text: #7F5F04;
+  --state-queued-soft: #F2ECDC;
+  --state-running: #0090A8;
+  --state-running-text: #066E80;
+  --state-running-soft: #DBEFF3;
+  --state-done: #0B9958;
+  --state-done-text: #097341;
+  --state-done-soft: #DDF1E8;
+  --state-error: #CA5556;
+  --state-error-text: #B03D41;
+  --state-error-soft: #F8E7E7;
+  --state-stopped: #B559A3;
+  --state-stopped-text: #9C428C;
+  --state-stopped-soft: #F5E8F2;
+  --state-idle: #8A7E75;
+  --state-idle-text: #6E6259;
+  --state-idle-soft: #EFEDEC;
+  --model-opus: #BB6546;
+  --model-sonnet: #5D7DC8;
+  --model-haiku: #0B9488;
+  --model-fable: #8B8318;
+  --model-other: #877E77;
+  --type-session: #0B2447;
+  --type-workflow: #2F8CAC;
+  --type-general: #B3676D;
+  --type-fork: #927F34;
+  --type-explore: #3D9372;
+  --type-plan: #9A6DA4;
+  --type-custom: #AD7044;
+}
+
+/* Blueprint, dark. Closest pair of state colours: error / stopped, OKLab distance 0.111 */
+:root[data-theme="blueprint"][data-mode="dark"],
+[data-theme="blueprint"][data-mode="dark"] {
+  color-scheme: dark;
+  --surface-app: #0B1B33;
+  --surface-canvas: #081528;
+  --surface-panel: #0F2340;
+  --surface-card: #132A4C;
+  --surface-raised: #19345C;
+  --surface-sunken: #071223;
+  --surface-hover: #19345C;
+  --surface-selected: #214272;
+  --text-primary: #E6F0FF;
+  --text-secondary: #A9C0E0;
+  --text-muted: #9AB3D5;
+  --border-subtle: #1B3660;
+  --border-default: #2B4C80;
+  --border-strong: #6A8FC8;
+  --accent: #4FD8F0;
+  --accent-hover: #7FE4F5;
+  --accent-soft: #12405A;
+  --accent-text: #4FD8F0;
+  --text-on-accent: #06202B;
+  --focus-ring: #4FD8F0;
+  --select-ring: #E6F0FF;
+  --shadow-color: #000000;
+  --state-queued: #EAB532;
+  --state-queued-text: #EAB532;
+  --state-queued-soft: #424946;
+  --state-running: #1BD3F5;
+  --state-running-text: #1BD3F5;
+  --state-running-soft: #154F71;
+  --state-done: #61DA92;
+  --state-done-text: #61DA92;
+  --state-done-soft: #24515B;
+  --state-error: #FFA09C;
+  --state-error-text: #FFA09C;
+  --state-error-soft: #47445E;
+  --state-stopped: #F897E4;
+  --state-stopped-text: #F897E4;
+  --state-stopped-soft: #45426D;
+  --state-idle: #B5BFCB;
+  --state-idle-text: #B5BFCB;
+  --state-idle-soft: #374B68;
+  --model-opus: #FEA484;
+  --model-sonnet: #9EBDFF;
+  --model-haiku: #4CD7C8;
+  --model-fable: #C9C261;
+  --model-other: #B7BEC7;
+  --type-session: #E6F0FF;
+  --type-workflow: #73CBED;
+  --type-general: #F6A4A9;
+  --type-fork: #D1BD73;
+  --type-explore: #7ED2AE;
+  --type-plan: #DAAAE5;
+  --type-custom: #EFAD80;
+}

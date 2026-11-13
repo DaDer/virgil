@@ -1,0 +1,11 @@
+recordings/
+node_modules/
+target/
+dist/
+build/
+.DS_Store
+.svelte-kit/
+*.log
+src-tauri/gen/
+.vscode/
+.idea/

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" data-theme="graphite" data-mode="light" data-density="comfortable" data-motion="full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Virgil</title>
+    <script>
+      // Theme bootstrap (ux-spec 2.8): set the theme attributes before the first paint.
+      // Keep in sync with src/lib/theme/theme.ts (SETTINGS_KEY, htmlAttributes).
+      (function () {
+        var s = {};
+        try { s = JSON.parse(localStorage.getItem('virgil.settings.v1') || '{}') || {}; } catch (e) {}
+        var themes = ['graphite', 'paper', 'blueprint', 'poster'];
+        var mm = function (q) { return !!(window.matchMedia && window.matchMedia(q).matches); };
+        var mode = s.mode === 'light' || s.mode === 'dark' ? s.mode : (mm('(prefers-color-scheme: dark)') ? 'dark' : 'light');
+        var motion = s.motion === 'full' || s.motion === 'reduced' ? s.motion : (mm('(prefers-reduced-motion: reduce)') ? 'reduced' : 'full');
+        var el = document.documentElement;
+        el.setAttribute('data-theme', themes.indexOf(s.theme) >= 0 ? s.theme : 'graphite');
+        el.setAttribute('data-mode', mode);
+        el.setAttribute('data-density', s.density === 'compact' ? 'compact' : 'comfortable');
+        el.setAttribute('data-motion', motion);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

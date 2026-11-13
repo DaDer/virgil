@@ -1,0 +1,142 @@
+/* Graphite theme. Generated from docs/ux-spec.md sections 4.5 and 4.7; edit the spec first.
+   Each block also matches a plain [data-theme] element, so previews (ThemeTile) can scope a theme. */
+
+:root[data-theme="graphite"],
+[data-theme="graphite"] {
+  --font-display: var(--font-ui);
+  --display-weight: 600;
+  --display-tracking: -0.01em;
+  --label-transform: none;
+  --label-tracking: 0.01em;
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+  --border-width: 1px;
+  --border-width-strong: 1.5px;
+  --container-border-style: solid;
+  --shadow-1: 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent);
+  --shadow-2: 0 4px 12px color-mix(in srgb, var(--shadow-color) 12%, transparent), 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent);
+  --shadow-3: 0 12px 32px color-mix(in srgb, var(--shadow-color) 20%, transparent), 0 2px 6px color-mix(in srgb, var(--shadow-color) 10%, transparent);
+  --canvas-pattern: radial-gradient(circle, var(--border-default) 1px, transparent 1.5px);
+  --canvas-pattern-size: 20px 20px;
+  --node-fill: var(--surface-card);
+  --edge-width: 1.5px;
+}
+
+/* Graphite, light. Closest pair of state colours: queued / error, OKLab distance 0.121 */
+:root[data-theme="graphite"][data-mode="light"],
+[data-theme="graphite"][data-mode="light"] {
+  color-scheme: light;
+  --surface-app: #F3F4F6;
+  --surface-canvas: #ECEEF1;
+  --surface-panel: #FAFAFB;
+  --surface-card: #FFFFFF;
+  --surface-raised: #FFFFFF;
+  --surface-sunken: #E9EBEF;
+  --surface-hover: #EEF0F3;
+  --surface-selected: #E3E6EB;
+  --text-primary: #14171C;
+  --text-secondary: #4A5160;
+  --text-muted: #5F6776;
+  --border-subtle: #E2E5EA;
+  --border-default: #CFD4DC;
+  --border-strong: #7F8796;
+  --accent: #14171C;
+  --accent-hover: #2A2F38;
+  --accent-soft: #E3E6EB;
+  --accent-text: #14171C;
+  --text-on-accent: #FFFFFF;
+  --focus-ring: #2563EB;
+  --select-ring: #14171C;
+  --shadow-color: #14171C;
+  --state-queued: #B2790C;
+  --state-queued-text: #8B5D02;
+  --state-queued-soft: #F4ECDD;
+  --state-running: #3986E4;
+  --state-running-text: #1166C0;
+  --state-running-soft: #E3EEFB;
+  --state-done: #1A9D4B;
+  --state-done-text: #017634;
+  --state-done-soft: #DFF1E6;
+  --state-error: #D5584F;
+  --state-error-text: #B63B35;
+  --state-error-soft: #F9E8E6;
+  --state-stopped: #C35AA4;
+  --state-stopped-text: #A6408A;
+  --state-stopped-soft: #F7E8F2;
+  --state-idle: #7F8793;
+  --state-idle-text: #5F6772;
+  --state-idle-soft: #EDEEF0;
+  --model-opus: #C66847;
+  --model-sonnet: #6083D3;
+  --model-haiku: #03998D;
+  --model-fable: #928A0F;
+  --model-other: #81868F;
+  --type-session: #14171C;
+  --type-workflow: #2C93B5;
+  --type-general: #BC6B72;
+  --type-fork: #9A8533;
+  --type-explore: #3B9875;
+  --type-plan: #A271AD;
+  --type-custom: #B67445;
+}
+
+/* Graphite, dark. Closest pair of state colours: running / idle, OKLab distance 0.115 */
+:root[data-theme="graphite"][data-mode="dark"],
+[data-theme="graphite"][data-mode="dark"] {
+  color-scheme: dark;
+  --surface-app: #0E1013;
+  --surface-canvas: #0A0B0D;
+  --surface-panel: #14171B;
+  --surface-card: #1A1D22;
+  --surface-raised: #22262D;
+  --surface-sunken: #0A0B0D;
+  --surface-hover: #23272E;
+  --surface-selected: #2C313A;
+  --text-primary: #ECEEF2;
+  --text-secondary: #A9B0BD;
+  --text-muted: #969EAC;
+  --border-subtle: #23272E;
+  --border-default: #323843;
+  --border-strong: #6A7382;
+  --accent: #ECEEF2;
+  --accent-hover: #FFFFFF;
+  --accent-soft: #2C313A;
+  --accent-text: #ECEEF2;
+  --text-on-accent: #0E1013;
+  --focus-ring: #6EA8FF;
+  --select-ring: #ECEEF2;
+  --shadow-color: #000000;
+  --state-queued: #E19B1B;
+  --state-queued-text: #E19B1B;
+  --state-queued-soft: #423621;
+  --state-running: #6EADFE;
+  --state-running-text: #6EADFE;
+  --state-running-soft: #2B3A4E;
+  --state-done: #5AC576;
+  --state-done-text: #5AC576;
+  --state-done-soft: #273F33;
+  --state-error: #FB8276;
+  --state-error-text: #FB8276;
+  --state-error-soft: #473133;
+  --state-stopped: #E882C8;
+  --state-stopped-text: #E882C8;
+  --state-stopped-soft: #433143;
+  --state-idle: #A4ABB8;
+  --state-idle-text: #A4ABB8;
+  --state-idle-soft: #363940;
+  --model-opus: #EB9070;
+  --model-sonnet: #86A9F7;
+  --model-haiku: #31C3B5;
+  --model-fable: #B6AF4D;
+  --model-other: #A5ABB5;
+  --type-session: #ECEEF2;
+  --type-workflow: #5FB8D9;
+  --type-general: #E19197;
+  --type-fork: #BEAA60;
+  --type-explore: #6BBF9B;
+  --type-plan: #C697D1;
+  --type-custom: #DB9A6E;
+}

@@ -1,0 +1,142 @@
+/* Paper theme. Generated from docs/ux-spec.md sections 4.5 and 4.7; edit the spec first.
+   Each block also matches a plain [data-theme] element, so previews (ThemeTile) can scope a theme. */
+
+:root[data-theme="paper"],
+[data-theme="paper"] {
+  --font-display: "Fraunces Variable", Georgia, "Times New Roman", serif;
+  --display-weight: 600;
+  --display-tracking: -0.005em;
+  --label-transform: none;
+  --label-tracking: 0.02em;
+  --radius-xs: 1px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-pill: 999px;
+  --border-width: 1px;
+  --border-width-strong: 1.5px;
+  --container-border-style: solid;
+  --shadow-1: none;
+  --shadow-2: 0 0 0 1px var(--border-strong);
+  --shadow-3: 0 0 0 1px var(--border-strong), 0 8px 24px color-mix(in srgb, var(--shadow-color) 14%, transparent);
+  --canvas-pattern: none;
+  --canvas-pattern-size: auto;
+  --node-fill: var(--surface-card);
+  --edge-width: 1px;
+}
+
+/* Paper, light. Closest pair of state colours: queued / idle, OKLab distance 0.101 */
+:root[data-theme="paper"][data-mode="light"],
+[data-theme="paper"][data-mode="light"] {
+  color-scheme: light;
+  --surface-app: #F4EFE6;
+  --surface-canvas: #EFE9DD;
+  --surface-panel: #F8F4EC;
+  --surface-card: #FCFAF5;
+  --surface-raised: #FFFDF8;
+  --surface-sunken: #EAE3D5;
+  --surface-hover: #F1EADD;
+  --surface-selected: #E6DDCB;
+  --text-primary: #221E18;
+  --text-secondary: #554D41;
+  --text-muted: #675E50;
+  --border-subtle: #E2D9C8;
+  --border-default: #CFC4AF;
+  --border-strong: #8C7F68;
+  --accent: #0F5E66;
+  --accent-hover: #0B4A51;
+  --accent-soft: #D5E5E3;
+  --accent-text: #0F5E66;
+  --text-on-accent: #FFFFFF;
+  --focus-ring: #0F5E66;
+  --select-ring: #221E18;
+  --shadow-color: #3B2F1E;
+  --state-queued: #A17000;
+  --state-queued-text: #825B09;
+  --state-queued-soft: #EFE7D3;
+  --state-running: #2B80BF;
+  --state-running-text: #0665A0;
+  --state-running-soft: #DFE9ED;
+  --state-done: #338F54;
+  --state-done-text: #037138;
+  --state-done-soft: #E0EBDE;
+  --state-error: #B95858;
+  --state-error-text: #A14445;
+  --state-error-soft: #F3E3DF;
+  --state-stopped: #9B60A8;
+  --state-stopped-text: #854B92;
+  --state-stopped-soft: #EEE4EA;
+  --state-idle: #81796D;
+  --state-idle-text: #686155;
+  --state-idle-soft: #EBE8E2;
+  --model-opus: #AC654B;
+  --model-sonnet: #5D79B6;
+  --model-haiku: #0D8D82;
+  --model-fable: #837D2F;
+  --model-other: #7F7971;
+  --type-session: #221E18;
+  --type-workflow: #3D849F;
+  --type-general: #A5666B;
+  --type-fork: #897A3F;
+  --type-explore: #478A6E;
+  --type-plan: #906A98;
+  --type-custom: #A06D4A;
+}
+
+/* Paper, dark. Closest pair of state colours: queued / idle, OKLab distance 0.095 */
+:root[data-theme="paper"][data-mode="dark"],
+[data-theme="paper"][data-mode="dark"] {
+  color-scheme: dark;
+  --surface-app: #1A1714;
+  --surface-canvas: #151310;
+  --surface-panel: #201C18;
+  --surface-card: #26221D;
+  --surface-raised: #2E2923;
+  --surface-sunken: #151310;
+  --surface-hover: #2E2923;
+  --surface-selected: #3A342C;
+  --text-primary: #F0E9DC;
+  --text-secondary: #BDB3A2;
+  --text-muted: #A89E8D;
+  --border-subtle: #2E2923;
+  --border-default: #40392F;
+  --border-strong: #877C6A;
+  --accent: #6FCBD1;
+  --accent-hover: #8ED9DE;
+  --accent-soft: #1F3A3C;
+  --accent-text: #6FCBD1;
+  --text-on-accent: #10201F;
+  --focus-ring: #6FCBD1;
+  --select-ring: #F0E9DC;
+  --shadow-color: #000000;
+  --state-queued: #D9A856;
+  --state-queued-text: #D9A856;
+  --state-queued-soft: #4A3D28;
+  --state-running: #6FB8F5;
+  --state-running-text: #6FB8F5;
+  --state-running-soft: #354048;
+  --state-done: #76C68D;
+  --state-done-text: #76C68D;
+  --state-done-soft: #364333;
+  --state-error: #F19390;
+  --state-error-text: #F19390;
+  --state-error-soft: #4F3934;
+  --state-stopped: #D299DF;
+  --state-stopped-text: #D299DF;
+  --state-stopped-soft: #483A44;
+  --state-idle: #B8B0A3;
+  --state-idle-text: #B8B0A3;
+  --state-idle-soft: #433E38;
+  --model-opus: #E49D85;
+  --model-sonnet: #95B0EC;
+  --model-haiku: #66C4B9;
+  --model-fable: #B9B56E;
+  --model-other: #B6B0A7;
+  --type-session: #F0E9DC;
+  --type-workflow: #7CBCD5;
+  --type-general: #DC9EA2;
+  --type-fork: #C0B17A;
+  --type-explore: #83C1A5;
+  --type-plan: #C7A2CF;
+  --type-custom: #D7A584;
+}

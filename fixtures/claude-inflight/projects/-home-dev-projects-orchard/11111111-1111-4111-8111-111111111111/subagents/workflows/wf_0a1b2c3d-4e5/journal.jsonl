@@ -1,0 +1,6 @@
+{"type":"launched"}
+{"type":"started","key":"v2:c14b1c5e61d96ee2384ef436ec484cde9815d7605b04fc09695418c78a70d264","agentId":"ab10c4d7e2f6a8101","label":"plan:outline","phase":"Plan"}
+{"type":"result","key":"v2:c14b1c5e61d96ee2384ef436ec484cde9815d7605b04fc09695418c78a70d264","agentId":"ab10c4d7e2f6a8101","result":"Plan written to docs/stock-plan.md.","remoteControlDeviceReport":false,"toolsUsed":["Read","Write","SubagentHandback"]}
+{"type":"started","key":"v2:47821de8a5c31a74018b9328ccac51af0cc72845a7ea776b5cb987aabff64891","agentId":"ab20d5e8f3a7b9202","label":"build:api","phase":"Build"}
+{"type":"started","key":"v2:662c5fbc1126380b71299c61280e7eca387852ce16d6ae92e63a4faf236e1d5c","agentId":"ab30e6f9a4b8c0303","label":"build:ui","phase":"Build"}
+{"type":"result","key":"v2:47821de8a5c31a74018b9328ccac51af0cc72845a7ea776b5cb987aabff64891","agentId":"ab20d5e8f3a7b9202","result":"Endpoint added in src/routes/adjust.ts.","remoteControlDeviceReport":false,"toolsUsed":["Read","Edit","Write","Bash","SubagentHandback"]}

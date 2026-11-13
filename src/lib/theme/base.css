@@ -1,0 +1,86 @@
+/* Reset, type roles, focus ring, scrollbars, shared keyframes and state helpers.
+   Every colour here is a var() from the theme files. */
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  background: var(--surface-app);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: var(--weight-regular);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+#app { height: 100%; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; }
+button:disabled { cursor: default; }
+h1, h2, h3, h4, p { margin: 0; }
+ul, ol { margin: 0; padding: 0; list-style: none; }
+svg { display: block; }
+
+/* Type roles (4.3) */
+.t-display { font-family: var(--font-display); font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: var(--display-weight); letter-spacing: var(--display-tracking); }
+.t-title { font-family: var(--font-display); font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: var(--display-weight); letter-spacing: var(--display-tracking); }
+.t-strong { font-weight: var(--weight-semibold); }
+.t-small { font-size: var(--text-sm); line-height: var(--leading-sm); }
+.t-label { font-size: var(--text-xs); line-height: var(--leading-xs); font-weight: var(--weight-semibold); text-transform: var(--label-transform); letter-spacing: var(--label-tracking); }
+:root[data-theme="blueprint"] .t-label { font-family: var(--font-mono); }
+.t-mono { font-family: var(--font-mono); font-size: var(--text-sm); line-height: var(--leading-sm); }
+.num { font-variant-numeric: tabular-nums; font-weight: var(--weight-medium); }
+.muted { color: var(--text-muted); }
+.secondary { color: var(--text-secondary); }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* Focus (2.9) */
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* Selection ring (1.4) */
+.is-selected { outline: 2px solid var(--select-ring); outline-offset: 2px; }
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--border-default) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: var(--radius-pill); border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+::selection { background: var(--accent-soft); color: var(--text-primary); }
+
+/* State helpers: set --st, --st-text, --st-soft for a state token family. */
+.st-queued  { --st: var(--state-queued);  --st-text: var(--state-queued-text);  --st-soft: var(--state-queued-soft); }
+.st-running { --st: var(--state-running); --st-text: var(--state-running-text); --st-soft: var(--state-running-soft); }
+.st-done    { --st: var(--state-done);    --st-text: var(--state-done-text);    --st-soft: var(--state-done-soft); }
+.st-error   { --st: var(--state-error);   --st-text: var(--state-error-text);   --st-soft: var(--state-error-soft); }
+.st-stopped { --st: var(--state-stopped); --st-text: var(--state-stopped-text); --st-soft: var(--state-stopped-soft); }
+.st-idle    { --st: var(--state-idle);    --st-text: var(--state-idle-text);    --st-soft: var(--state-idle-soft); }
+
+/* Shared keyframes (5.1). Anything that loops carries the class "loops". */
+@keyframes as-spin { to { transform: rotate(360deg); } }
+@keyframes as-breathe { from { opacity: 0.35; } to { opacity: 1; } }
+@keyframes as-blink { from { opacity: 1; } to { opacity: 0.4; } }
+@keyframes as-sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@keyframes as-shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@keyframes as-ping { from { transform: scale(1); opacity: 0.6; } to { transform: scale(2.2); opacity: 0; } }
+@keyframes as-appear { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes as-slide-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes as-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* Theme and mode switch cross-fade (2.8). */
+html.theme-switching *, html.theme-switching *::before, html.theme-switching *::after {
+  transition: background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out) !important;
+}
+
+/* Loops pause while the window is hidden (5.3, rule 4). */
+:root[data-paused="true"] .loops { animation-play-state: paused !important; }
+
+/* Canvas surface with the theme's pattern (4.5). */
+.canvas-surface {
+  background-color: var(--surface-canvas);
+  background-image: var(--canvas-pattern);
+  background-size: var(--canvas-pattern-size);
+}

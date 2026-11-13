@@ -1,0 +1,79 @@
+/* Base tokens, the same in every theme. docs/ux-spec.md sections 4.1, 4.2 and 5.2. */
+
+:root {
+  --font-ui: "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  /* --font-display is set by each theme (4.5) */
+
+  /* density: 1 comfortable, 0.75 compact (set by settings as data-density on <html>) */
+  --density: 1;
+
+  /* spacing, 4 px grid */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  /* component padding that follows density */
+  --pad-1: calc(var(--space-1) * var(--density));
+  --pad-2: calc(var(--space-2) * var(--density));
+  --pad-3: calc(var(--space-3) * var(--density));
+  --pad-4: calc(var(--space-4) * var(--density));
+
+  /* type scale: size / line height */
+  --text-xs: 11px;   --leading-xs: 16px;
+  --text-sm: 12px;   --leading-sm: 18px;
+  --text-md: 13px;   --leading-md: 20px;   /* body default */
+  --text-lg: 15px;   --leading-lg: 22px;
+  --text-xl: 18px;   --leading-xl: 26px;
+  --text-2xl: 24px;  --leading-2xl: 32px;
+  --text-3xl: 32px;  --leading-3xl: 40px;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* fixed sizes */
+  --size-navrail: 64px;
+  --size-topbar: 48px;
+  --size-statusbar: 26px;
+  --size-replaybar: 64px;
+  --size-inspector: 360px;
+  --size-row: calc(28px * (0.4 + 0.6 * var(--density)));  /* 28 or about 24 */
+  --size-control: 28px;
+  --size-icon: 16px;
+
+  /* motion */
+  --dur-1: 120ms;   /* hover, press, small fades */
+  --dur-2: 200ms;   /* panels, popovers, state colour change */
+  --dur-3: 320ms;   /* node moves after layout, drawer open */
+  --dur-4: 600ms;   /* one-shot pulses */
+  --dur-loop: 1600ms; /* one cycle of any looping animation */
+  --dur-fade: 120ms; /* panel fade, kept under reduced motion (5.2) */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.25, 1);
+  --ease-in: cubic-bezier(0.5, 0, 1, 0.6);
+  --ease-linear: linear;
+
+  /* layers */
+  --z-canvas: 0;
+  --z-panel: 10;
+  --z-sticky: 20;
+  --z-overlay: 30;   /* inspector when overlaying */
+  --z-popover: 40;
+  --z-dialog: 50;
+  --z-toast: 60;
+}
+:root[data-density="compact"] { --density: 0.75; }
+
+/* Reduced motion (5.2): every duration token drops to zero; loops stop. */
+:root[data-motion="reduced"] {
+  --dur-1: 0ms; --dur-2: 0ms; --dur-3: 0ms; --dur-4: 0ms;
+}
+:root[data-motion="reduced"] .loops { animation: none !important; }

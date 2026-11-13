@@ -1,0 +1,1 @@
+{"agentType":"workflow-subagent","isBuiltIn":true,"description":"plan:outline","workflowPhase":"Plan","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":false,"model":"opus","pickedEffortModel":"claude-opus-5-5"}

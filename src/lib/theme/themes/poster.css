@@ -1,0 +1,142 @@
+/* Poster theme. Generated from docs/ux-spec.md sections 4.5 and 4.7; edit the spec first.
+   Each block also matches a plain [data-theme] element, so previews (ThemeTile) can scope a theme. */
+
+:root[data-theme="poster"],
+[data-theme="poster"] {
+  --font-display: "Space Grotesk Variable", var(--font-ui);
+  --display-weight: 700;
+  --display-tracking: -0.02em;
+  --label-transform: uppercase;
+  --label-tracking: 0.04em;
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+  --border-width: 2px;
+  --border-width-strong: 3px;
+  --container-border-style: solid;
+  --shadow-1: 3px 3px 0 var(--shadow-color);
+  --shadow-2: 5px 5px 0 var(--shadow-color);
+  --shadow-3: 8px 8px 0 var(--shadow-color);
+  --canvas-pattern: none;
+  --canvas-pattern-size: auto;
+  --node-fill: var(--surface-card);
+  --edge-width: 2px;
+}
+
+/* Poster, light. Closest pair of state colours: queued / idle, OKLab distance 0.104 */
+:root[data-theme="poster"][data-mode="light"],
+[data-theme="poster"][data-mode="light"] {
+  color-scheme: light;
+  --surface-app: #FFFBF0;
+  --surface-canvas: #FFF6DD;
+  --surface-panel: #FFFFFF;
+  --surface-card: #FFFFFF;
+  --surface-raised: #FFFFFF;
+  --surface-sunken: #F3ECD8;
+  --surface-hover: #FFF1C2;
+  --surface-selected: #FFE680;
+  --text-primary: #111111;
+  --text-secondary: #3D3D3D;
+  --text-muted: #595959;
+  --border-subtle: #D9D2BE;
+  --border-default: #111111;
+  --border-strong: #111111;
+  --accent: #FFD60A;
+  --accent-hover: #FFC400;
+  --accent-soft: #FFF1B8;
+  --accent-text: #111111;
+  --text-on-accent: #111111;
+  --focus-ring: #1B4DFF;
+  --select-ring: #111111;
+  --shadow-color: #111111;
+  --state-queued: #A77601;
+  --state-queued-text: #855E05;
+  --state-queued-soft: #EDE4CC;
+  --state-running: #2377FE;
+  --state-running-text: #035DDC;
+  --state-running-soft: #D3E4FF;
+  --state-done: #069A3E;
+  --state-done-text: #09762E;
+  --state-done-soft: #CDEBD8;
+  --state-error: #EE1118;
+  --state-error-text: #C1010D;
+  --state-error-soft: #FCCFD1;
+  --state-stopped: #CF2BB7;
+  --state-stopped-text: #B500A0;
+  --state-stopped-soft: #F5D5F1;
+  --state-idle: #858073;
+  --state-idle-text: #6C675B;
+  --state-idle-soft: #E7E6E3;
+  --model-opus: #D74B01;
+  --model-sonnet: #4676F1;
+  --model-haiku: #0B9488;
+  --model-fable: #8C830D;
+  --model-other: #848076;
+  --type-session: #111111;
+  --type-workflow: #098DB2;
+  --type-general: #CC5162;
+  --type-fork: #977E0D;
+  --type-explore: #0B976D;
+  --type-plan: #A85DB9;
+  --type-custom: #C16302;
+}
+
+/* Poster, dark. Closest pair of state colours: error / idle, OKLab distance 0.104 */
+:root[data-theme="poster"][data-mode="dark"],
+[data-theme="poster"][data-mode="dark"] {
+  color-scheme: dark;
+  --surface-app: #121212;
+  --surface-canvas: #0A0A0A;
+  --surface-panel: #1A1A1A;
+  --surface-card: #1F1F1F;
+  --surface-raised: #262626;
+  --surface-sunken: #0A0A0A;
+  --surface-hover: #2B2B2B;
+  --surface-selected: #3A3200;
+  --text-primary: #FAFAFA;
+  --text-secondary: #C9C9C9;
+  --text-muted: #A6A6A6;
+  --border-subtle: #333333;
+  --border-default: #FAFAFA;
+  --border-strong: #FAFAFA;
+  --accent: #FFD60A;
+  --accent-hover: #FFE04D;
+  --accent-soft: #3A3200;
+  --accent-text: #FFD60A;
+  --text-on-accent: #111111;
+  --focus-ring: #7DA2FF;
+  --select-ring: #FAFAFA;
+  --shadow-color: #000000;
+  --state-queued: #F4B00C;
+  --state-queued-text: #F4B00C;
+  --state-queued-soft: #52421A;
+  --state-running: #98BFFE;
+  --state-running-text: #98BFFE;
+  --state-running-soft: #3C4555;
+  --state-done: #2BE263;
+  --state-done-text: #2BE263;
+  --state-done-soft: #224E2F;
+  --state-error: #FEA195;
+  --state-error-text: #FEA195;
+  --state-error-soft: #553E3B;
+  --state-stopped: #FE91E8;
+  --state-stopped-text: #FE91E8;
+  --state-stopped-soft: #553A4F;
+  --state-idle: #C3BDB0;
+  --state-idle-text: #C3BDB0;
+  --state-idle-soft: #464542;
+  --model-opus: #FEA484;
+  --model-sonnet: #9EBDFF;
+  --model-haiku: #0BDAC9;
+  --model-fable: #CFC20C;
+  --model-other: #C1BDB3;
+  --type-session: #FAFAFA;
+  --type-workflow: #40CFFF;
+  --type-general: #FF9EA6;
+  --type-fork: #DBBC3F;
+  --type-explore: #4CDAA7;
+  --type-plan: #E69EF7;
+  --type-custom: #FEA667;
+}
