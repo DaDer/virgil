@@ -35,7 +35,7 @@ describe('scenario', () => {
     const end = scenarioAt(events, SCENARIO_DURATION);
     const s = end.sessions[SESSION_ORCHARD];
     const run = s.runs[DEMO_RUN_ID];
-    expect(Object.keys(end.sessions)).toHaveLength(3);
+    expect(Object.keys(end.sessions)).toHaveLength(5);
     expect(run.final).toBe(true);
     expect(run.phases.map((p) => p.title)).toEqual(['Plan', 'Build', 'Review', 'Fix']);
     expect(run.agentIds.length).toBeGreaterThanOrEqual(20);
@@ -70,7 +70,7 @@ describe('mock source', () => {
     const h = harness();
     await h.connect();
     const first = await h.src.getSnapshot();
-    expect(Object.keys(first.sessions).length).toBe(3);
+    expect(Object.keys(first.sessions).length).toBe(5);
     h.advance(20_000);
     let mine: Snapshot = first;
     mine = applyEvents(mine, h.events.filter((e) => e.seq > first.seq));

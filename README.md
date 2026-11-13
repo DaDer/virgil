@@ -1,6 +1,18 @@
-# Virgil
+<p align="center">
+  <img src="src-tauri/icons/128x128@2x.png" width="112" height="112" alt="Virgil app icon">
+</p>
 
-**A menu-bar companion for Claude Code. It tells you which session needs you, and keeps your runs alive while you're away.**
+<h1 align="center">Virgil</h1>
+
+<p align="center">
+  <strong>A menu-bar companion for Claude Code.<br>It tells you which session needs you, and keeps your runs alive while you're away.</strong>
+</p>
+
+<p align="center">
+  <img src="docs/assets/demo.gif" width="900" alt="A 25-second tour of Virgil: the Now list with sessions that need you, finished and working, then one session's agent graph, workflow phases and timeline">
+</p>
+
+<p align="center"><sub>The app window, running on built-in demo data.</sub></p>
 
 When you run more than one Claude Code session, you end up asking the same things all day: is it still
 working, did it finish, is it waiting for me? Every time you ask the session itself, you spend a turn.
@@ -30,10 +42,20 @@ Each row has one line saying where the session stands: its last message, the com
 what it is waiting for ("Waiting for 1 agent and 2 background commands"). Background shell commands and
 subagents count as work, so a session that is waiting on a long test run shows as working, not finished.
 
+<p align="center">
+  <img src="docs/assets/menu-bar.png" width="640" alt="The menu-bar menu: sessions grouped as needs you, finished, gone quiet and working, each with one line and an age, followed by the keep-awake and notification switches">
+</p>
+<p align="center"><sub>The menu-bar menu. An illustration with demo data, not a screen capture.</sub></p>
+
 ### Tells you when something changes
 
 A notification when a session finishes, asks you something, or goes quiet. Nothing fires at start-up or
 for sessions Virgil has only just seen.
+
+<p align="center">
+  <img src="docs/assets/notification.png" width="640" alt="A notification reading: notes finished. The RSS feed is live at /rss.xml and linked from the home page.">
+</p>
+<p align="center"><sub>A notification. An illustration with demo data, not a screen capture.</sub></p>
 
 ### Keeps the computer awake while sessions work
 
@@ -161,8 +183,10 @@ mise exec -- npm run tauri dev      # run the app
 mise exec -- npm run tauri build    # bundle (.app/.dmg, .msi/.exe, .deb/.AppImage/.rpm)
 ```
 
-In a plain browser (`npm run dev`) the UI runs on a scripted mock source, so the views can be worked on
-without the core.
+In a plain browser (`npm run dev`) the UI runs on a scripted mock source with five made-up sessions, so
+the views, including the Now list, can be worked on without the core. Add `?at=112` to the address to
+start 112 seconds into the scenario, when its workflow run is in full swing; the demo above was
+captured that way.
 
 ### Layout
 
@@ -231,7 +255,7 @@ repository secrets.
 ## The name
 
 Virgil is the guide who walks Dante through, and the name sounds like *vigil*: staying awake to keep
-watch. That is the job.
+watch. That is the job. The icon is a V holding a light.
 
 ## Licence
 

@@ -27,6 +27,8 @@ export interface MockOptions {
   now?: () => number;
   /** Run the internal interval. Tests pass false and call tick(). */
   timers?: boolean;
+  /** How far into the scenario live mode starts, in ms (URL ?at=<seconds>). Default: near the start. */
+  startOffset?: number;
 }
 
 function forReplay(events: VirgilEvent[]): VirgilEvent[] {
@@ -55,6 +57,7 @@ export class MockSource implements DataSource {
 
   // live
   private liveBase = 0;
+  private readonly startOffset: number;
   // replay
   private position = 0;
   private playing = false;
@@ -66,6 +69,7 @@ export class MockSource implements DataSource {
 
   constructor(opts: MockOptions = {}) {
     this.variant = opts.variant ?? 'demo';
+    this.startOffset = Math.min(Math.max(opts.startOffset ?? LIVE_START_OFFSET, 0), SCENARIO_DURATION - 1000);
     this.now = opts.now ?? (() => Date.now());
     this.timers = opts.timers ?? true;
     this.startLive();
@@ -224,7 +228,7 @@ export class MockSource implements DataSource {
     this.mode = 'live';
     this.playing = false;
     const wall = this.now();
-    this.liveBase = wall - LIVE_START_OFFSET;
+    this.liveBase = wall - this.startOffset;
     this.script = this.variant === 'demo' || this.variant === 'slow' || this.variant === 'error' ? buildScenario(this.liveBase) : [];
     this.cursor = 0;
     this.snap = emptySnapshot('live');
@@ -327,6 +331,13 @@ export class MockSource implements DataSource {
   get skippingGaps(): boolean {
     return this.skipGaps;
   }
+}
+
+/** `?at=120` starts the live scenario 120 seconds in (for screenshots and demos). */
+export function mockStartFromUrl(): number | undefined {
+  if (typeof location === 'undefined') return undefined;
+  const at = Number(new URLSearchParams(location.search).get('at'));
+  return Number.isFinite(at) && at > 0 ? at * 1000 : undefined;
 }
 
 export function mockVariantFromUrl(): MockVariant {

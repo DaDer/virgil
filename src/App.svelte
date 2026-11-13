@@ -3,7 +3,7 @@
   // starts the stores and routes to the views.
   import { onMount } from 'svelte';
   import { createTauriSource } from './lib/data/tauriSource';
-  import { MockSource, mockVariantFromUrl } from './lib/data/mockSource';
+  import { MockSource, mockStartFromUrl, mockVariantFromUrl } from './lib/data/mockSource';
   import { inTauri } from './lib/data/source';
   import AppFrame from './lib/frame/AppFrame.svelte';
   import OverviewView from './lib/overview/OverviewView.svelte';
@@ -18,7 +18,7 @@
 
   onMount(() => {
     clock.start();
-    const source = inTauri() ? createTauriSource() : new MockSource({ variant: mockVariantFromUrl() });
+    const source = inTauri() ? createTauriSource() : new MockSource({ variant: mockVariantFromUrl(), startOffset: mockStartFromUrl() });
     void world.start(source).then(() => actions.applyStoredClaudeDir());
     // The menu-bar list; picking a session there opens it here.
     void attention.start((sessionId) => actions.openSession(sessionId));

@@ -28,6 +28,19 @@ export type UnsequencedEvent = DistributiveOmit<VirgilEvent, 'seq'>;
 export const SESSION_ORCHARD = '7c1e4a52-3b9d-4f6e-8a21-5d0c9b7e1f34';
 export const SESSION_NOTES = 'b42d9e10-6a7f-4c3b-9e58-2f1a8d6c4b07';
 export const SESSION_SCRATCH = 'e9f03b6d-1c2a-4d8e-b7f5-6a4c3e2d1b09';
+export const SESSION_BILLING = '3a7d51c8-9e04-4b6f-a2d3-7c18e5f09b21';
+export const SESSION_DOCS = '6f2b0e94-5d1c-4a87-b3e6-0a9d4c7f1e52';
+
+/**
+ * What each mock session last said, for the Now panel in a plain browser. In the app this line
+ * comes from the core (the session's last message), which the snapshot does not carry.
+ */
+export const DEMO_LAST_MESSAGE: Record<string, string> = {
+  [SESSION_ORCHARD]: 'The stock screen is built and reviewed. All checks pass; 14 files changed.',
+  [SESSION_NOTES]: 'The RSS feed is live at /rss.xml and linked from the home page.',
+  [SESSION_BILLING]: 'Should invoice totals be rounded per line or once on the total?',
+  [SESSION_DOCS]: 'Search now covers the API reference. 212 pages indexed, build passes.',
+};
 export const DEMO_RUN_ID = 'wf_3c9a1e70-5b2';
 
 class Lcg {
@@ -448,6 +461,34 @@ export function buildScenario(base: number): VirgilEvent[] {
   });
   b.work(s3, MAIN_AGENT_ID, -14_300 * S, -10_800 * S, ['/home/dev/scratch/parse.py', '/home/dev/scratch/sample.log'], '/home/dev/scratch', { gap: [60_000, 240_000] });
   b.finish(-10_800 * S, s3, MAIN_AGENT_ID, 'stopped', { stateReason: 'sessionGone' });
+
+  // ---------- session 4: billing, asking the person something ----------
+  const s4 = SESSION_BILLING;
+  const BILLING = '/home/dev/projects/billing';
+  b.session(P, makeSessionInfo({
+    sessionId: s4, pid: 52340, cwd: BILLING, projectSlug: '-home-dev-projects-billing', name: 'billing',
+    title: 'Fix invoice rounding', status: 'waiting', startedAt: T(-2400), updatedAt: T(-240), statusUpdatedAt: T(-240),
+  }));
+  b.spawn(P, {
+    agentId: MAIN_AGENT_ID, sessionId: s4, kind: 'main', label: 'Fix invoice rounding', model: 'claude-opus-5-5', state: 'waiting',
+    task: 'Invoices are a cent off for some customers. Find the rounding bug and fix it with tests.',
+    startedAt: T(-2400), lastActivityAt: T(-2400),
+  });
+  b.work(s4, MAIN_AGENT_ID, -2300 * S, -250 * S, ['src/invoice.ts', 'src/money.ts', 'tests/invoice.test.ts'].map((f) => `${BILLING}/${f}`), BILLING, { gap: [30_000, 120_000] });
+
+  // ---------- session 5: docs-site, finished a while ago ----------
+  const s5 = SESSION_DOCS;
+  const DOCS = '/home/dev/sites/docs-site';
+  b.session(P, makeSessionInfo({
+    sessionId: s5, pid: 49877, cwd: DOCS, projectSlug: '-home-dev-sites-docs-site', name: 'docs-site',
+    title: 'Add search to the docs', status: 'idle', startedAt: T(-7200), updatedAt: T(-720), statusUpdatedAt: T(-720),
+  }));
+  b.spawn(P, {
+    agentId: MAIN_AGENT_ID, sessionId: s5, kind: 'main', label: 'Add search to the docs', model: 'claude-sonnet-5-5', state: 'waiting',
+    task: 'Add full-text search to the docs site, covering the guides and the API reference.',
+    startedAt: T(-7200), lastActivityAt: T(-7200),
+  });
+  b.work(s5, MAIN_AGENT_ID, -7000 * S, -730 * S, ['src/search/index.ts', 'src/components/SearchBox.astro', 'astro.config.mjs'].map((f) => `${DOCS}/${f}`), DOCS, { gap: [60_000, 300_000] });
 
   return b.build();
 }
