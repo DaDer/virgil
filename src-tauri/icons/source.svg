@@ -1,23 +1,38 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Virgil mark: a spawn tree (one parent, three children) seen through a lens. Original artwork. -->
+  <!-- Virgil mark: a V holding a light, for the guide who keeps watch through the night. Original artwork. -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#1f2937"/>
-      <stop offset="1" stop-color="#0b1220"/>
+    <linearGradient id="night" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#27325c"/>
+      <stop offset="0.55" stop-color="#141a33"/>
+      <stop offset="1" stop-color="#090c1a"/>
     </linearGradient>
-    <linearGradient id="lens" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#5eead4"/>
-      <stop offset="1" stop-color="#6366f1"/>
+    <radialGradient id="halo" cx="512" cy="372" r="330" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffd772" stop-opacity="0.50"/>
+      <stop offset="0.45" stop-color="#f6a93b" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#f6a93b" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="arms" x1="512" y1="300" x2="512" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff4cf"/>
+      <stop offset="0.5" stop-color="#ffd166"/>
+      <stop offset="1" stop-color="#f08c2e"/>
     </linearGradient>
+    <radialGradient id="flame" cx="0.42" cy="0.38" r="0.7">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.6" stop-color="#fff1bd"/>
+      <stop offset="1" stop-color="#ffd772"/>
+    </radialGradient>
+    <clipPath id="tile"><rect x="64" y="64" width="896" height="896" rx="204"/></clipPath>
   </defs>
-  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
-  <circle cx="512" cy="512" r="300" fill="none" stroke="url(#lens)" stroke-width="44"/>
-  <g stroke="#e5e7eb" stroke-width="28" stroke-linecap="round" fill="none">
-    <path d="M512 380 L512 470 M512 470 L392 600 M512 470 L512 620 M512 470 L632 600"/>
+  <rect x="64" y="64" width="896" height="896" rx="204" fill="url(#night)"/>
+  <g clip-path="url(#tile)">
+    <circle cx="512" cy="372" r="330" fill="url(#halo)"/>
+    <g fill="#dfe6ff">
+      <circle cx="236" cy="246" r="9" opacity="0.55"/>
+      <circle cx="806" cy="214" r="7" opacity="0.45"/>
+      <circle cx="842" cy="470" r="6" opacity="0.35"/>
+      <circle cx="178" cy="520" r="6" opacity="0.30"/>
+    </g>
   </g>
-  <circle cx="512" cy="372" r="58" fill="#f9fafb"/>
-  <circle cx="384" cy="620" r="46" fill="#5eead4"/>
-  <circle cx="512" cy="644" r="46" fill="#a5b4fc"/>
-  <circle cx="640" cy="620" r="46" fill="#fbbf24"/>
-  <path d="M724 724 L842 842" stroke="url(#lens)" stroke-width="64" stroke-linecap="round"/>
+  <path d="M300 326 L512 742 L724 326" fill="none" stroke="url(#arms)" stroke-width="104" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="512" cy="372" r="70" fill="url(#flame)"/>
 </svg>

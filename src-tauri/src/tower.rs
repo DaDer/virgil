@@ -157,8 +157,20 @@ impl Tower {
                 }
             },
         );
-        if let Some(icon) = app.default_window_icon() {
-            builder = builder.icon(icon.clone());
+        // macOS tints a one-colour "template" image to suit a light or dark menu bar. Other systems
+        // have no such thing, so they get the full-colour app icon.
+        let template = if cfg!(target_os = "macos") {
+            tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")).ok()
+        } else {
+            None
+        };
+        match template {
+            Some(icon) => builder = builder.icon(icon).icon_as_template(true),
+            None => {
+                if let Some(icon) = app.default_window_icon() {
+                    builder = builder.icon(icon.clone());
+                }
+            }
         }
         match builder.build(app) {
             Ok(tray) => g.tray = Some(tray),

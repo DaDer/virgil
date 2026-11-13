@@ -51,7 +51,7 @@ export const ICONS = {
   'type-explore': '<circle cx="10.5" cy="10.5" r="5"/><path d="M14.3 14.3L19 19"/>',
   'type-plan': '<path d="M5 7l1.5 1.5L9 6M5 12.5l1.5 1.5L9 11.5M5 18l1.5 1.5L9 17M12 7.5h7M12 13h7M12 18.5h7"/>',
   'type-custom': '<path d="M12 4.5l7.5 7.5-7.5 7.5L4.5 12z"/>',
-  mark: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.2"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/>',
+  mark: '<path d="M5.2 6.2 12 19.6l6.8-13.4" stroke-width="2.6"/><circle cx="12" cy="7" r="2" fill="currentColor" stroke="none"/>',
   empty: '<rect x="4" y="5" width="16" height="14" rx="2.5"/><path d="M4 9.5h16M8 13.5h8M9.5 16.5h5"/>',
   sessions: '<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7 9.5l3 2.5-3 2.5M12.5 15h4.5"/>',
   error: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.5"/><circle cx="12" cy="16.2" r=".6" fill="currentColor"/>',

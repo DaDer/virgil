@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
+  <!-- Menu-bar version of the mark: one colour, used as a template image on macOS. -->
+  <path d="M10.5 12 L22 34 L33.5 12" fill="none" stroke="#000" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="22" cy="13.2" r="3.6" fill="#000"/>
+</svg>
