@@ -75,7 +75,8 @@ recording/   ──▶   adapter → engine → events      tray, notifications,
 
 ## Install
 
-There are no packaged releases yet. Build it from source:
+Installers will be on the [Releases](https://github.com/DaDer/virgil/releases) page once the first
+version is published. Until then, or to run the latest code, build it from source:
 
 ```sh
 git clone https://github.com/DaDer/virgil.git && cd virgil
@@ -204,6 +205,28 @@ Open it with the Live/Replay switch in the top bar. Virgil lists recordings foun
 opens any folder. A recording that is still being written can be opened too.
 
 Recordings hold your real prompts and code. `recordings/` is gitignored; keep them out of the repository.
+
+## Releasing
+
+Installers for macOS (Apple silicon and Intel), Linux and Windows are built by GitHub Actions and kept
+on the [Releases](https://github.com/DaDer/virgil/releases) page.
+
+1. Set the new version: `python3 tools/set-version.py 0.2.0`, then `cargo check` to refresh
+   `Cargo.lock`. The version lives in `Cargo.toml` and `package.json`; the app bundle takes it from
+   `Cargo.toml`.
+2. Run the checks, commit, and push to `main`. Wait for the `ci` workflow to pass.
+3. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+4. The `release` workflow builds every installer and attaches them to a **draft** release named after
+   the tag. It fails early if the tag and the files disagree on the version.
+5. Open the draft on GitHub, write the notes, and publish it. A tag with a suffix, such as
+   `v0.2.0-beta.1`, is marked as a pre-release.
+
+To try the build without releasing, run the `release` workflow by hand from the Actions tab. It builds
+the same installers and keeps them as workflow artifacts for 14 days.
+
+The installers are not signed yet, so macOS and Windows show a warning the first time the app is
+opened. Signing needs an Apple Developer ID and a Windows code-signing certificate, added as
+repository secrets.
 
 ## The name
 
