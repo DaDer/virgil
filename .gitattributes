@@ -1,0 +1,6 @@
+# Keep text files as LF on every system: tests compare fixtures byte for byte.
+* text=auto eol=lf
+*.png binary
+*.gif binary
+*.icns binary
+*.ico binary
