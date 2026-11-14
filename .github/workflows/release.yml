@@ -86,7 +86,12 @@ jobs:
             | Windows | `Virgil_*_x64-setup.exe` (or the `.msi`) |
             | Linux | `.AppImage`, `.deb` or `.rpm` |
 
-            These builds are not signed yet. On macOS, open the app the first time with right-click > Open (or allow it under System Settings > Privacy & Security). On Windows, choose "More info" > "Run anyway".
+            ## First launch
+
+            These builds are not signed with a developer certificate yet, so the system asks before running them.
+
+            - **macOS**: open Virgil once, dismiss the warning, then go to System Settings > Privacy & Security and choose "Open Anyway". Or run `xattr -cr /Applications/Virgil.app` in Terminal and open it normally.
+            - **Windows**: choose "More info", then "Run anyway".
 
       - name: Build only
         if: github.ref_type != 'tag'

@@ -248,9 +248,12 @@ on the [Releases](https://github.com/DaDer/virgil/releases) page.
 To try the build without releasing, run the `release` workflow by hand from the Actions tab. It builds
 the same installers and keeps them as workflow artifacts for 14 days.
 
-The installers are not signed yet, so macOS and Windows show a warning the first time the app is
-opened. Signing needs an Apple Developer ID and a Windows code-signing certificate, added as
-repository secrets.
+The installers are not signed with a developer certificate yet, so macOS and Windows ask before running
+the app the first time. On macOS: open it once, then choose "Open Anyway" under System Settings >
+Privacy & Security, or run `xattr -cr /Applications/Virgil.app`. On Windows: "More info", then "Run
+anyway". The macOS app carries an ad-hoc signature (`signingIdentity: "-"` in `tauri.conf.json`);
+without it a downloaded copy is reported as damaged. Proper signing needs an Apple Developer ID and a
+Windows code-signing certificate, added as repository secrets.
 
 ## The name
 

@@ -35,7 +35,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "shortDescription": "See what your Claude Code agents are doing",
-    "category": "DeveloperTool"
+    "shortDescription": "Which Claude Code session needs you, and keep-awake for long runs",
+    "category": "DeveloperTool",
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }
