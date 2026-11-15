@@ -21,7 +21,15 @@ export const SIZE = {
   session: { w: 248, h: 88 },
   runCollapsed: { w: 248, h: 72 },
   emptyPhase: { w: 168, h: 72 },
+  stack: { w: 168, h: 56 },
 } as const;
+
+/** In the active view, an agent that ended this recently is still drawn (faded by its node). */
+export const RECENT_MS = 5 * 60_000;
+/** A failed agent stays in view this long, so a failure is not folded away unnoticed. */
+export const FAILED_KEEP_MS = 60 * 60_000;
+
+export type Focus = 'active' | 'all';
 
 export const RUN_HEADER = 36;
 export const PHASE_HEADER = 28;
@@ -41,9 +49,20 @@ export interface GraphOptions {
   viewTime: number;
   /** Replay: hide agents that start after viewTime (ux-spec 1.4). */
   hideFuture: boolean;
+  /**
+   * `active`: draw agents that are working, their ancestors and the ones that just ended; fold
+   * the rest into one stack per parent or phase. `all` (the default) draws every agent.
+   */
+  focus?: Focus;
+  /** Stacks the person opened, by stack node id: their agents are drawn again. */
+  expanded?: Record<string, boolean>;
+  /** An agent to keep in view whatever its state (the selection). */
+  keep?: string | null;
+  /** How long an ended agent stays drawn in the active view. Default RECENT_MS. */
+  recentMs?: number;
 }
 
-export type NodeKind = 'session' | 'agent' | 'run' | 'phase';
+export type NodeKind = 'session' | 'agent' | 'run' | 'phase' | 'stack';
 
 export interface GNode {
   id: string;
@@ -60,6 +79,9 @@ export interface GNode {
   phaseIndex?: number;
   detail?: Detail;
   collapsed?: boolean;
+  /** Stack nodes: the agents folded into it, and whether it is opened. */
+  agentIds?: string[];
+  expanded?: boolean;
 }
 
 export type EdgeKind = 'spawn' | 'run' | 'sequence';
@@ -94,6 +116,30 @@ export const SESSION_NODE = 'session';
 export const agentNodeId = (id: string) => `a:${id}`;
 export const runNodeId = (id: string) => `r:${id}`;
 export const phaseNodeId = (runId: string, index: number) => `p:${runId}:${index}`;
+export const stackNodeId = (ownerNodeId: string) => `s:${ownerNodeId}`;
+
+/**
+ * The agents the active view keeps in sight: working ones, ones that ended within RECENT_MS,
+ * failures within FAILED_KEEP_MS, `keep`, and every ancestor of those.
+ */
+export function inFocus(s: Session, viewTime: number, keep?: string | null, recentMs = RECENT_MS): Set<string> {
+  const out = new Set<string>();
+  for (const a of Object.values(s.agents)) {
+    if (a.agentId === MAIN_AGENT_ID) continue;
+    const ended = a.endedAt ?? a.lastActivityAt ?? 0;
+    const live = a.state === 'running' || a.state === 'waiting' || a.state === 'queued';
+    const failed = a.state === 'failed' && !a.superseded && ended >= viewTime - FAILED_KEEP_MS;
+    if (!(live || failed || ended >= viewTime - recentMs || a.agentId === keep)) continue;
+    let cur: Agent | undefined = a;
+    const guard = new Set<string>();
+    while (cur && cur.agentId !== MAIN_AGENT_ID && !guard.has(cur.agentId)) {
+      guard.add(cur.agentId);
+      out.add(cur.agentId);
+      cur = cur.parentAgentId ? s.agents[cur.parentAgentId] : undefined;
+    }
+  }
+  return out;
+}
 
 /** Level of detail for agents in a container of `count` agents (ux-spec 3.2 table). */
 export function detailFor(setting: DetailSetting, zoom: number, count: number): Detail {
@@ -146,6 +192,16 @@ export function buildGraph(s: Session, opts: GraphOptions): GraphModel {
   const layoutEdges: LayoutInput['edges'] = [];
   const agentNode = new Map<string, string>();
   const visible = (a: Agent) => !(opts.hideFuture && startsAfter(a, opts.viewTime));
+  const active = opts.focus === 'active';
+  const focus = active ? inFocus(s, opts.viewTime, opts.keep, opts.recentMs) : null;
+  const expanded = opts.expanded ?? {};
+  /** Splits a container's agents into the ones to draw and the ones its stack holds. */
+  const split = (list: Agent[], stackId: string): { shown: Agent[]; folded: Agent[]; open: boolean } => {
+    if (!focus) return { shown: list, folded: [], open: false };
+    const folded = list.filter((a) => !focus.has(a.agentId));
+    const open = !!expanded[stackId] && folded.length > 0;
+    return { shown: open ? list : list.filter((a) => focus.has(a.agentId)), folded, open };
+  };
 
   nodes.push({ id: SESSION_NODE, kind: 'session', parent: null, width: SIZE.session.w, height: SIZE.session.h, x: 0, y: 0, agentId: MAIN_AGENT_ID });
   agentNode.set(MAIN_AGENT_ID, SESSION_NODE);
@@ -181,15 +237,40 @@ export function buildGraph(s: Session, opts: GraphOptions): GraphModel {
     const children: GNode[] = [];
     for (const ph of phases) {
       const pid = phaseNodeId(run.runId, ph.index);
-      const agents = byPhase.get(ph.index) ?? [];
+      const sid = stackNodeId(pid);
+      const { shown: agents, folded, open } = split(byPhase.get(ph.index) ?? [], sid);
+      // The stack takes one more cell of the grid, after the agents.
+      const cells = agents.length + (folded.length ? 1 : 0);
       const detail = detailFor(opts.detail, opts.zoom, agents.length);
-      const cell = SIZE[detail];
-      const { cols, rows } = gridFor(agents.length);
-      const w = agents.length ? Math.max(SIZE.emptyPhase.w, PAD * 2 + cols * cell.w + (cols - 1) * CELL_GAP) : SIZE.emptyPhase.w;
-      const h = agents.length ? PHASE_HEADER + PAD + rows * cell.h + (rows - 1) * CELL_GAP + PAD : SIZE.emptyPhase.h;
+      // A stack needs room for its label, so a phase holding one never packs in dots.
+      const cell = folded.length && detail === 'dot' ? SIZE.compact : SIZE[detail];
+      const { cols, rows } = gridFor(cells);
+      const w = cells ? Math.max(SIZE.emptyPhase.w, PAD * 2 + cols * cell.w + (cols - 1) * CELL_GAP) : SIZE.emptyPhase.w;
+      const h = cells ? PHASE_HEADER + PAD + rows * cell.h + (rows - 1) * CELL_GAP + PAD : SIZE.emptyPhase.h;
       const pnode: GNode = { id: pid, kind: 'phase', parent: rid, width: w, height: h, x, y: RUN_HEADER + PAD, runId: run.runId, phaseIndex: ph.index };
       phaseNodes.push(pnode);
       topOf.set(pid, rid);
+      if (folded.length) {
+        const i = agents.length;
+        children.push({
+          id: sid,
+          kind: 'stack',
+          parent: pid,
+          width: cell.w,
+          height: Math.min(cell.h, SIZE.stack.h),
+          x: PAD + (i % cols) * (cell.w + CELL_GAP),
+          y: PHASE_HEADER + PAD + Math.floor(i / cols) * (cell.h + CELL_GAP),
+          runId: run.runId,
+          phaseIndex: ph.index,
+          agentIds: folded.map((a) => a.agentId),
+          expanded: open,
+        });
+        topOf.set(sid, rid);
+        if (!open) for (const a of folded) {
+          agentNode.set(a.agentId, sid);
+          topOf.set(agentNodeId(a.agentId), rid);
+        }
+      }
       agents.forEach((a, i) => {
         const id = agentNodeId(a.agentId);
         children.push({
@@ -219,14 +300,41 @@ export function buildGraph(s: Session, opts: GraphOptions): GraphModel {
   }
 
   // Plain agents, in start order, hanging off whoever started them.
-  const plain = Object.values(s.agents)
+  const allPlain = Object.values(s.agents)
     .filter((a) => a.agentId !== MAIN_AGENT_ID && !a.runId && visible(a))
     .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.agentId.localeCompare(b.agentId));
-  const plainCount = plain.length;
-  const plainDetail = detailFor(opts.detail, opts.zoom, plainCount > 40 ? FULL_MAX + 1 : 1);
+  const plainCount = allPlain.length;
+  const allPlainIds = new Set(allPlain.map((a) => a.agentId));
+  /** Where an agent hangs: the node of its nearest ancestor that is drawn, else the session. */
+  const ownerOf = (a: Agent, drawn: Set<string>): string => {
+    let cur = a.parentAgentId;
+    const guard = new Set<string>();
+    while (cur && cur !== MAIN_AGENT_ID && !guard.has(cur)) {
+      guard.add(cur);
+      if (drawn.has(cur)) return agentNodeId(cur);
+      if (!allPlainIds.has(cur)) return agentNode.get(cur) ?? SESSION_NODE;
+      cur = s.agents[cur]?.parentAgentId ?? null;
+    }
+    return SESSION_NODE;
+  };
+  // Fold what is out of focus into one stack per owner; an opened stack draws its agents again.
+  const focused = new Set(allPlain.filter((a) => !focus || focus.has(a.agentId)).map((a) => a.agentId));
+  const stacks = new Map<string, Agent[]>();
+  for (const a of allPlain) {
+    if (focused.has(a.agentId)) continue;
+    const owner = ownerOf(a, focused);
+    const list = stacks.get(owner);
+    if (list) list.push(a);
+    else stacks.set(owner, [a]);
+  }
+  const reopened = new Set<string>();
+  for (const [owner, list] of stacks) if (expanded[stackNodeId(owner)]) for (const a of list) reopened.add(a.agentId);
+  const plain = allPlain.filter((a) => focused.has(a.agentId) || reopened.has(a.agentId));
+  const plainDetail = detailFor(opts.detail, opts.zoom, plain.length > 40 ? FULL_MAX + 1 : 1);
   for (const a of plain) {
     const id = agentNodeId(a.agentId);
-    nodes.push({ id, kind: 'agent', parent: null, width: SIZE[plainDetail].w, height: SIZE[plainDetail].h, x: 0, y: 0, agentId: a.agentId, detail: plainDetail });
+    const detail = reopened.has(a.agentId) && plainDetail === 'full' ? 'compact' : plainDetail;
+    nodes.push({ id, kind: 'agent', parent: null, width: SIZE[detail].w, height: SIZE[detail].h, x: 0, y: 0, agentId: a.agentId, detail });
     agentNode.set(a.agentId, id);
     topOf.set(id, id);
   }
@@ -234,8 +342,19 @@ export function buildGraph(s: Session, opts: GraphOptions): GraphModel {
   const parentNodeOf = (agentId: string | null): string => {
     if (!agentId || agentId === MAIN_AGENT_ID) return SESSION_NODE;
     if (plainIds.has(agentId)) return agentNodeId(agentId);
+    const a = s.agents[agentId];
+    if (a && allPlainIds.has(agentId)) return ownerOf(a, plainIds);
     return agentNode.get(agentId) ?? SESSION_NODE;
   };
+  const stackEdges: { src: string; sid: string }[] = [];
+  for (const [owner, list] of stacks) {
+    const sid = stackNodeId(owner);
+    const open = !!expanded[sid];
+    nodes.push({ id: sid, kind: 'stack', parent: null, width: SIZE.stack.w, height: SIZE.stack.h, x: 0, y: 0, agentIds: list.map((a) => a.agentId), expanded: open });
+    topOf.set(sid, sid);
+    if (!open) for (const a of list) agentNode.set(a.agentId, sid);
+    stackEdges.push({ src: owner, sid });
+  }
 
   const seenLayout = new Set<string>();
   const addLayoutEdge = (source: string, target: string) => {
@@ -254,6 +373,10 @@ export function buildGraph(s: Session, opts: GraphOptions): GraphModel {
     edges.push({ id: `spawn:${src}>${tgt}`, kind: 'spawn', source: src, target: tgt, agentId: a.agentId });
     addLayoutEdge(src, tgt);
   }
+  for (const { src, sid } of stackEdges) {
+    edges.push({ id: `stack:${src}>${sid}`, kind: 'spawn', source: src, target: sid });
+    addLayoutEdge(src, sid);
+  }
   for (const run of runs) {
     const src = parentNodeOf(run.parentAgentId);
     const tgt = runNodeId(run.runId);
@@ -267,7 +390,7 @@ export function buildGraph(s: Session, opts: GraphOptions): GraphModel {
     edges: layoutEdges,
   };
   const key =
-    nodes.map((n) => `${n.id}|${n.parent ?? ''}|${n.width}x${n.height}|${n.x},${n.y}`).join(';') +
+    nodes.map((n) => `${n.id}|${n.parent ?? ''}|${n.width}x${n.height}|${n.x},${n.y}${n.agentIds ? `|${n.agentIds.length}${n.expanded ? 'o' : ''}` : ''}`).join(';') +
     '#' +
     edges.map((e) => e.id).join(';');
   return { nodes, edges, layout, key, agentNode, agentCount: plainCount + runs.reduce((n, r) => n + r.agentIds.length, 0) };

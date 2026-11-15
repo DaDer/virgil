@@ -16,13 +16,14 @@
   import { links } from '../shared/links.svelte';
   import { loopBudget } from '../shared/motion';
   import AgentNode from './AgentNode.svelte';
-  import { buildGraph, chainEdges, SESSION_NODE, zoomBand, type DetailSetting, type GraphModel } from './buildGraph';
+  import { buildGraph, chainEdges, SESSION_NODE, zoomBand, type DetailSetting, type Focus, type GraphModel } from './buildGraph';
   import GraphToolbar from './GraphToolbar.svelte';
   import { graph } from './graphState.svelte';
   import { browserLayoutEngine, type LayoutResult } from './layout';
   import PhaseNode from './PhaseNode.svelte';
   import RunNode from './RunNode.svelte';
   import SessionNode from './SessionNode.svelte';
+  import StackNode from './StackNode.svelte';
   import { sharedLinks } from './sharedLinks';
   import SharedFileEdge from './SharedFileEdge.svelte';
   import SharedFilesPopover from './SharedFilesPopover.svelte';
@@ -30,7 +31,7 @@
 
   let { sessionId }: { sessionId: string } = $props();
 
-  const nodeTypes = { session: SessionNode, agent: AgentNode, run: RunNode, phase: PhaseNode };
+  const nodeTypes = { session: SessionNode, agent: AgentNode, run: RunNode, phase: PhaseNode, stack: StackNode };
   const edgeTypes = { spawn: SpawnEdge, shared: SharedFileEdge };
   const flow = useSvelteFlow();
   const engine = browserLayoutEngine();
@@ -41,6 +42,10 @@
   let sharedOn = $state(false);
   let sharedMode = $state<'edits' | 'all'>('edits');
   let collapsed = $state<Record<string, boolean>>({});
+  /** Stacks of folded agents the person opened, by stack node id. */
+  let expandedStacks = $state<Record<string, boolean>>({});
+  /** The person's choice of Active or All; null follows the default for the session. */
+  let focusChoice = $state<Focus | null>(null);
   let detailZoom = $state(1);
   let zoom = $state(1);
   let userMoved = false;
@@ -50,13 +55,32 @@
   const session = $derived(world.session(sessionId));
   const replay = $derived(world.mode === 'replay');
   // Quantised so the structure is not rebuilt every frame while a replay plays.
-  const viewTime = $derived(Math.floor(clock.viewTime / (replay ? 1000 : 60_000)) * (replay ? 1000 : 60_000));
+  const viewStep = $derived(replay ? 1000 : 60_000);
+  const viewTime = $derived(Math.floor(clock.viewTime / viewStep) * viewStep);
 
+  // Active by default while the session is running live; history is the point in replay and for
+  // sessions that have ended, so those start on All.
+  const focus = $derived<Focus>(focusChoice ?? (!replay && session?.liveness !== 'stale' ? 'active' : 'all'));
+  // `?recent=30` shortens how long ended agents stay drawn, to 30 seconds: the mock scenario lasts
+  // only a few minutes, so with the real five minutes nothing in it would ever fold.
+  const recentParam = typeof location === 'undefined' ? NaN : Number(new URLSearchParams(location.search).get('recent'));
+  const recentMs = Number.isFinite(recentParam) && recentParam > 0 ? recentParam * 1000 : undefined;
+  // The selected agent stays in view even when it would be folded away.
+  const keep = $derived.by(() => {
+    const c = selection.current;
+    return c?.kind === 'agent' && c.sessionId === sessionId ? c.id : null;
+  });
   const model = $derived(
     session
-      ? buildGraph(session, { detail, zoom: zoomBand(detailZoom), collapsed, viewTime, hideFuture: replay })
+      ? buildGraph(session, { detail, zoom: zoomBand(detailZoom), collapsed, viewTime, hideFuture: replay, focus, expanded: expandedStacks, keep, recentMs })
       : null,
   );
+  $effect(() => {
+    graph.fadeEnded = focus === 'active';
+  });
+  graph.stackToggle = (stackId: string) => {
+    expandedStacks = { ...expandedStacks, [stackId]: !expandedStacks[stackId] };
+  };
 
   graph.collapsedToggle = (runId: string) => {
     const node = model?.nodes.find((n) => n.runId === runId && n.kind === 'run');
@@ -79,7 +103,9 @@
           ? { sessionId }
           : n.kind === 'agent'
             ? { sessionId, agentId: n.agentId!, detail: n.detail! }
-            : n.kind === 'run'
+            : n.kind === 'stack'
+              ? { sessionId, agentIds: n.agentIds ?? [], expanded: !!n.expanded }
+              : n.kind === 'run'
               ? { sessionId, runId: n.runId!, collapsed: !!n.collapsed }
               : { sessionId, runId: n.runId!, index: n.phaseIndex! };
       return {
@@ -420,6 +446,7 @@
       return `mm st-${a ? AGENT_STATE[a.state].tone : 'idle'}`;
     }
     if (n.type === 'session') return 'mm mm-session';
+    if (n.type === 'stack') return 'mm st-idle';
     return 'mm mm-container';
   }
 </script>
@@ -462,6 +489,8 @@
   <GraphToolbar
     {zoom}
     {detail}
+    {focus}
+    onfocus={(f) => (focusChoice = f)}
     sharedFiles={sharedOn}
     {sharedMode}
     {linkNote}

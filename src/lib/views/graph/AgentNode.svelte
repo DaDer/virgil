@@ -22,6 +22,8 @@
   const hoverDim = $derived(graph.related != null && !graph.related.has(data.agentId));
   const fileBadge = $derived(touch ? (touch.writes > 0 ? ('E' as const) : ('R' as const)) : undefined);
   const animate = $derived(graph.loops.has(data.agentId) && data.detail !== 'dot');
+  // In the active view, agents that have ended step back so the working ones stand out.
+  const ended = $derived(graph.fadeEnded && !!agent && (agent.state === 'done' || agent.state === 'stopped') && !selected);
 
   function enter(e: PointerEvent) {
     hover.set(sel.agent(data.sessionId, data.agentId));
@@ -35,7 +37,7 @@
 
 <Handle type="target" position={Position.Left} isConnectable={false} class="as-handle" />
 {#if agent}
-  <div class="wrap" class:ring={!!touch} class:file-dim={fileDim} class:half={hoverDim && !fileDim && !searchDim} onpointerenter={enter} onpointerleave={leave} role="presentation">
+  <div class="wrap" class:ended class:ring={!!touch} class:file-dim={fileDim} class:half={hoverDim && !fileDim && !searchDim} onpointerenter={enter} onpointerleave={leave} role="presentation">
     <AgentCard
       {agent}
       variant="node"
@@ -56,6 +58,8 @@
 
 <style>
   .wrap { border-radius: var(--radius-md); transition: opacity var(--dur-1) var(--ease-out); }
+  .ended { opacity: 0.6; }
+  .ended:hover { opacity: 1; }
   .half { opacity: 0.55; }
   .file-dim { opacity: 0.4; }
   .ring { outline: 2px solid var(--accent); outline-offset: 4px; }

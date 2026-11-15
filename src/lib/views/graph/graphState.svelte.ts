@@ -25,6 +25,10 @@ class GraphState {
   /** Hovered agent for the tooltip, with the pointer position. */
   tip = $state.raw<{ agentId: string; x: number; y: number } | null>(null);
   collapsedToggle: (runId: string) => void = () => {};
+  /** Opens or closes a stack of folded agents, by its node id. */
+  stackToggle: (stackId: string) => void = () => {};
+  /** Active view: agents that have ended are drawn faded. */
+  fadeEnded = $state(false);
 }
 
 export const graph = new GraphState();

@@ -7,6 +7,10 @@ import {
   defaultCollapsed,
   detailFor,
   gridFor,
+  inFocus,
+  stackNodeId,
+  agentNodeId,
+  phaseNodeId,
   SESSION_NODE,
   SIZE,
   zoomBand,
@@ -169,5 +173,76 @@ describe('layout', () => {
     const res = (await e.request(g.layout))!;
     expect(res.positions['a:a8'].x).toBeGreaterThan(res.positions['a:a0'].x);
     expect(fallbackLayout(g.layout).positions[SESSION_NODE]).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe('active focus', () => {
+  const now = T0 + 3_600_000;
+  const base = { sessionId: SID, kind: 'subagent' as const, parentAgentId: 'main', spawnDepth: 1, startedAt: T0 };
+  function session() {
+    const s = oneAgent();
+    const add = (agentId: string, patch: Record<string, unknown>) => {
+      s.agents[agentId] = { ...Object.values(s.agents).find((a) => a.agentId !== 'main')!, ...base, agentId, label: agentId, runId: null, phaseIndex: null, ...patch } as never;
+    };
+    for (const id of Object.keys(s.agents)) if (id !== 'main') delete s.agents[id];
+    add('live', { state: 'running', endedAt: null, lastActivityAt: now });
+    add('old-parent', { state: 'done', endedAt: now - 50 * 60_000 });
+    add('live-child', { state: 'running', endedAt: null, parentAgentId: 'old-parent', spawnDepth: 2 });
+    add('recent', { state: 'done', endedAt: now - 2 * 60_000 });
+    add('failed', { state: 'failed', endedAt: now - 30 * 60_000 });
+    for (let i = 0; i < 6; i++) add(`old-${i}`, { state: i === 0 ? 'stopped' : 'done', endedAt: now - 45 * 60_000 });
+    add('old-grandchild', { state: 'done', endedAt: now - 45 * 60_000, parentAgentId: 'old-0', spawnDepth: 2 });
+    return s;
+  }
+  const drawn = (m: ReturnType<typeof buildGraph>) => m.nodes.filter((n) => n.kind === 'agent').map((n) => n.agentId).sort();
+
+  it('keeps working agents, their ancestors, recent ones and failures; folds the rest into one stack per owner', () => {
+    const s = session();
+    expect([...inFocus(s, now)].sort()).toEqual(['failed', 'live', 'live-child', 'old-parent', 'recent']);
+    const m = buildGraph(s, opts({ viewTime: now, focus: 'active' }));
+    expect(drawn(m)).toEqual(['failed', 'live', 'live-child', 'old-parent', 'recent']);
+    const stacks = m.nodes.filter((n) => n.kind === 'stack');
+    expect(stacks).toHaveLength(1);
+    expect(stacks[0].id).toBe(stackNodeId(SESSION_NODE));
+    // The grandchild of a folded agent goes into the same stack, under the nearest drawn ancestor.
+    expect(stacks[0].agentIds).toHaveLength(7);
+    expect(m.agentNode.get('old-3')).toBe(stacks[0].id);
+    expect(m.edges.some((e) => e.source === SESSION_NODE && e.target === stacks[0].id)).toBe(true);
+    expect(m.layout.nodes.some((n) => n.id === stacks[0].id)).toBe(true);
+    // Everything is drawn in the default view.
+    expect(drawn(buildGraph(s, opts({ viewTime: now })))).toHaveLength(12);
+  });
+
+  it('draws a stack\'s agents again when it is opened, and keeps the selected agent in view', () => {
+    const s = session();
+    const sid = stackNodeId(SESSION_NODE);
+    const open = buildGraph(s, opts({ viewTime: now, focus: 'active', expanded: { [sid]: true } }));
+    expect(drawn(open)).toHaveLength(12);
+    expect(open.nodes.find((n) => n.id === sid)?.expanded).toBe(true);
+    expect(open.agentNode.get('old-3')).toBe(agentNodeId('old-3'));
+    expect(open.edges.some((e) => e.source === agentNodeId('old-0') && e.target === agentNodeId('old-grandchild'))).toBe(true);
+    const kept = buildGraph(s, opts({ viewTime: now, focus: 'active', keep: 'old-grandchild' }));
+    expect(drawn(kept)).toEqual(expect.arrayContaining(['old-grandchild', 'old-0']));
+    expect(buildGraph(s, opts({ viewTime: now, focus: 'active' })).key).not.toBe(open.key);
+  });
+
+  it('folds the finished agents of a workflow phase into a stack cell inside the phase', () => {
+    const s = sixtyAgents();
+    const run = Object.values(s.runs)[0];
+    // The agents the full view draws inside the run; make the first one work and the rest old.
+    const ids = buildGraph(s, opts({ viewTime: now })).nodes.filter((n) => n.kind === 'agent' && n.runId === run.runId).map((n) => n.agentId!);
+    ids.forEach((id, i) => Object.assign(s.agents[id], i === 0 ? { state: 'running', endedAt: null } : { state: 'done', endedAt: now - 30 * 60_000, lastActivityAt: now - 30 * 60_000 }));
+    const m = buildGraph(s, opts({ viewTime: now, focus: 'active' }));
+    const inRun = m.nodes.filter((n) => n.kind === 'agent' && n.runId === run.runId);
+    expect(inRun.map((n) => n.agentId)).toEqual([ids[0]]);
+    const stacks = m.nodes.filter((n) => n.kind === 'stack' && n.runId === run.runId);
+    expect(stacks.length).toBeGreaterThan(0);
+    expect([...stacks.flatMap((st) => st.agentIds!), ids[0]].sort()).toEqual([...ids].sort());
+    for (const st of stacks) {
+      expect(st.parent).toBe(phaseNodeId(run.runId, st.phaseIndex!));
+      const phase = m.nodes.find((n) => n.id === st.parent)!;
+      expect(st.x + st.width).toBeLessThanOrEqual(phase.width);
+      expect(st.y + st.height).toBeLessThanOrEqual(phase.height);
+    }
   });
 });

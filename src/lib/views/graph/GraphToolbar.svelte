@@ -3,11 +3,14 @@
   import Button from '../../components/Button.svelte';
   import Menu from '../../components/Menu.svelte';
   import MenuItem from '../../components/MenuItem.svelte';
-  import type { DetailSetting } from './buildGraph';
+  import SegmentedControl from '../../components/SegmentedControl.svelte';
+  import type { DetailSetting, Focus } from './buildGraph';
 
   let {
     zoom,
     detail,
+    focus,
+    onfocus,
     sharedFiles,
     sharedMode,
     linkNote,
@@ -21,6 +24,9 @@
   }: {
     zoom: number;
     detail: DetailSetting;
+    /** Active: working agents, with the rest folded into stacks. All: every agent. */
+    focus: Focus;
+    onfocus: (f: Focus) => void;
     sharedFiles: boolean;
     sharedMode: 'edits' | 'all';
     linkNote?: string;
@@ -52,6 +58,17 @@
   <button type="button" class="step" aria-label="Zoom out" title="Zoom out (-)" onclick={onzoomout}>−</button>
   <button type="button" class="zoom num t-small" onclick={onzoomreset} title="Reset zoom (0)">{Math.round(zoom * 100)}%</button>
   <button type="button" class="step" aria-label="Zoom in" title="Zoom in (+)" onclick={onzoomin}>+</button>
+  <span class="sep" aria-hidden="true"></span>
+  <SegmentedControl
+    size="sm"
+    label="Which agents to show"
+    value={focus}
+    options={[
+      { value: 'active', label: 'Active' },
+      { value: 'all', label: 'All' },
+    ]}
+    onchange={onfocus}
+  />
   <span class="sep" aria-hidden="true"></span>
   <button type="button" class="menu-btn t-small" bind:this={detailBtn} aria-haspopup="menu" aria-expanded={detailOpen} onclick={() => (detailOpen = !detailOpen)}>
     Detail: {DETAIL.find((d) => d.value === detail)?.label}
