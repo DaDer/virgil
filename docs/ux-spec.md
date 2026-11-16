@@ -296,6 +296,10 @@ Interactions: hover raises the card (`--shadow-2`, translateY -1 px). Single cli
 
 Scale: with 1 session the card is capped at 480 px wide and left-aligned. With 10, two or three columns. With 60, the grid scrolls; cards outside the viewport use `content-visibility: auto` with `contain-intrinsic-size: 320px 168px`.
 
+Now panel (above the sections, live mode only): the attention list from the shell, the same one the menu bar shows (`crates/core/src/attention.rs`). One row per session, grouped **Needs you**, **Finished**, **Gone quiet**, **Working**: group label, name, the one line on where it stands, agent count, time in that state. Under a row, each running background command on its own `--text-sm` line in `--text-muted`: "↳ summary", "by agent label" when an agent (not the main thread) started it, and "running 12m" (time since `startedAt`, ticking with the clock). An empty summary shows "Unnamed command" in italics. At most 3 are listed, oldest first, then "+N more background commands". Ended commands are not listed here; the Graph shows those. Clicking anywhere on the row opens the session.
+
+Menu bar: the same groups, one item per session ("name · line · age"). Under a session item, each running background command is a disabled (greyed) item, "↳ summary (agent label) · age", at most 3, then "+ N more background commands".
+
 ### 3.2 Graph
 
 Purpose: who started whom, how the work is grouped, and what is alive right now.
@@ -324,10 +328,12 @@ Structure:
 - The session is the root node at the left. Direction is left to right (`elk.direction: RIGHT`, algorithm `layered`, `elk.hierarchyHandling: INCLUDE_CHILDREN`, node spacing 16, layer spacing 56).
 - Each run is a container node (`RunGroup`). Inside it each phase is a container (`PhaseGroup`), placed left to right in phase order. Agents inside a phase are packed in a grid with `ceil(sqrt(n))` columns, at most 4 columns. This packing (and the placement of phases inside a run) is computed in `buildGraph.ts`, so each run is a fixed-size box and ELK lays out only the top level: session, plain agents and runs. (Deviation from version 1 of this spec, which had ELK `rectpacking` inside each phase: one algorithm, cheaper, and the same visual result.)
 - Agents started with the Agent tool hang off whoever started them (the session or another agent) as ordinary nodes.
+- Background commands (Bash calls sent to the background, data-contract 2.8) hang off the agent that started them as small `JobNode`s; the main thread's hang off the session. A command of a workflow agent hangs off that agent's cell, or off the run when the run is collapsed; for layout it counts as an edge from the run.
 - Edges:
   - **Spawn edge**: parent to child, for non-workflow agents. Solid, 1.5 px, `--border-strong`, smooth-step path, small arrowhead.
   - **Run edge**: session (or the agent that started the run) to the `RunGroup`. Same style, 2 px.
   - **Sequence edge**: phase to next phase inside a run. 1 px, `--border-default`, no arrowhead fill. Workflow agents have no individual edges: being inside the phase box is the link. This keeps a 58-agent run at 6 edges, not 58.
+  - **Job edge**: starting agent (or session, or collapsed run) to a `JobNode`. 1 px, `--border-strong`, dashed `3 3`, no arrowhead. While the command runs it takes `--state-running` and its dashes flow, within the same budget of 12 looping things as agents (agents first, then the newest running commands).
   - **Shared-file link** (overlay, below).
 
 `AgentNode`, three levels of detail:
@@ -368,7 +374,11 @@ Full `AgentNode`:
 | Small branch icon | the agent ran in its own git worktree |
 | Stack badge "+3" on the right edge | the agent started 3 agents that are currently collapsed |
 
-`SessionNode` (248 x 88): terminal glyph, session name, project, state, and counts "12 agents · 2 runs".
+`SessionNode` (248 x 88): terminal glyph, session name, project, state, and counts "12 agents · 2 runs", with "· 3 commands" when the session has background commands.
+
+`JobNode` (184 x 40; a 28 x 28 rounded square in the state colour with the terminal glyph at the dot level): terminal glyph, the command's summary on one line ("Unnamed command" when it has none), below it the elapsed time while running or "Took 2m 10s" once ended, and the state icon on the right. Running: `--state-running` border. Done and stopped: their state icons, drawn at 60% when the view fades ended agents (Active). Failed: `--state-error` border on `--state-error-soft`. Unknown (ended without a notice): the unknown icon, always at 60%. Hover shows a tooltip after 400 ms: full summary, state and duration, start time, and the output file path as text (Virgil never reads the file). A command is not a selection of its own: clicking it selects the agent (or session) that started it. It reads its state by id, so a state change never relayouts.
+
+Active and All (toolbar): All draws every agent and command. Active (the default for a live session) draws agents that are working, ended in the last 5 minutes or failed in the last hour, the selected agent, and the ancestors of these; the same rule holds for commands (running, ended in the last 5 minutes, failed in the last hour), and a drawn command keeps its starting agent and that agent's ancestors in view. Everything else folds into a stack node: one per owner for plain agents, one stack cell per phase inside a run. A folded command goes into the stack that holds its starting agent when that agent is folded, else into the stack of the agent's node, shared with its folded child agents (created if there is none). The stack reads "3 finished · 1 failed · 2 commands"; **Show** draws its agents and commands again, **Hide** folds them back.
 
 `RunGroup` header (36 px): Run state icon, workflow name, a stepper of small squares (one per phase, filled by phase state), elapsed time, agent count, collapse button. Collapsed, it becomes a 248 x 72 node showing name, state, "58 agents · 6 phases · 7.9M tok", and a segmented progress bar. Runs that finished before `viewTime` minus 10 minutes start collapsed when the session has more than one run; the newest run is always expanded.
 

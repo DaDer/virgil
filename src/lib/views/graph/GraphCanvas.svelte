@@ -5,8 +5,8 @@
   import { MiniMap, SvelteFlow, useSvelteFlow, type Edge, type Node, type Viewport } from '@xyflow/svelte';
   import { onDestroy, untrack } from 'svelte';
   import { MAIN_AGENT_ID, type Agent, type FileTouch } from '../../contract';
-  import { taskSummary, formatDuration } from '../../format';
-  import { AGENT_STATE } from '../../states';
+  import { taskSummary, formatClock, formatDuration } from '../../format';
+  import { AGENT_STATE, BACKGROUND_STATUS } from '../../states';
   import { actions } from '../../stores/actions';
   import { clock } from '../../stores/clock.svelte';
   import { hover, sel, selection } from '../../stores/selection.svelte';
@@ -14,11 +14,12 @@
   import { ui } from '../../stores/ui.svelte';
   import { world } from '../../stores/world.svelte';
   import { links } from '../shared/links.svelte';
-  import { loopBudget } from '../shared/motion';
+  import { LOOP_MAX, loopBudget } from '../shared/motion';
   import AgentNode from './AgentNode.svelte';
   import { buildGraph, chainEdges, SESSION_NODE, zoomBand, type DetailSetting, type Focus, type GraphModel } from './buildGraph';
   import GraphToolbar from './GraphToolbar.svelte';
   import { graph } from './graphState.svelte';
+  import JobNode, { jobLabel } from './JobNode.svelte';
   import { browserLayoutEngine, type LayoutResult } from './layout';
   import PhaseNode from './PhaseNode.svelte';
   import RunNode from './RunNode.svelte';
@@ -31,7 +32,7 @@
 
   let { sessionId }: { sessionId: string } = $props();
 
-  const nodeTypes = { session: SessionNode, agent: AgentNode, run: RunNode, phase: PhaseNode, stack: StackNode };
+  const nodeTypes = { session: SessionNode, agent: AgentNode, run: RunNode, phase: PhaseNode, stack: StackNode, job: JobNode };
   const edgeTypes = { spawn: SpawnEdge, shared: SharedFileEdge };
   const flow = useSvelteFlow();
   const engine = browserLayoutEngine();
@@ -104,7 +105,9 @@
           : n.kind === 'agent'
             ? { sessionId, agentId: n.agentId!, detail: n.detail! }
             : n.kind === 'stack'
-              ? { sessionId, agentIds: n.agentIds ?? [], expanded: !!n.expanded }
+              ? { sessionId, agentIds: n.agentIds ?? [], taskIds: n.taskIds ?? [], expanded: !!n.expanded }
+              : n.kind === 'job'
+              ? { sessionId, taskId: n.taskId!, detail: n.detail! }
               : n.kind === 'run'
               ? { sessionId, runId: n.runId!, collapsed: !!n.collapsed }
               : { sessionId, runId: n.runId!, index: n.phaseIndex! };
@@ -132,7 +135,7 @@
       source: e.source,
       target: e.target,
       type: 'spawn',
-      data: { kind: e.kind, sessionId, agentId: e.agentId, runId: e.runId },
+      data: { kind: e.kind, sessionId, agentId: e.agentId, runId: e.runId, taskId: e.taskId },
       selectable: false,
       focusable: false,
       zIndex: e.kind === 'sequence' ? 1 : 0,
@@ -231,6 +234,11 @@
     const next = s ? loopBudget(Object.values(s.agents).filter((a) => a.agentId !== MAIN_AGENT_ID)) : new Set<string>();
     const cur = untrack(() => graph.loops);
     if (next.size !== cur.size || [...next].some((x) => !cur.has(x))) graph.loops = next;
+    // Running background commands share the budget: the newest get what the agents leave.
+    const running = s ? world.backgroundTasks(s.sessionId).filter((t) => t.status === 'running') : [];
+    const jobs = new Set(running.slice(Math.max(0, running.length - Math.max(0, LOOP_MAX - next.size))).map((t) => t.taskId));
+    const curJobs = untrack(() => graph.jobLoops);
+    if (jobs.size !== curJobs.size || [...jobs].some((x) => !curJobs.has(x))) graph.jobLoops = jobs;
   });
 
   function updateChain() {
@@ -437,6 +445,18 @@
     return () => clearTimeout(timer);
   });
 
+  let jobTipShown = $state<{ taskId: string; x: number; y: number } | null>(null);
+  $effect(() => {
+    const t = graph.jobTip;
+    if (!t) {
+      jobTipShown = null;
+      return;
+    }
+    const timer = setTimeout(() => (jobTipShown = t), 400);
+    return () => clearTimeout(timer);
+  });
+  const jobTipTask = $derived(jobTipShown ? world.backgroundTask(sessionId, jobTipShown.taskId) : null);
+
   let root: HTMLDivElement | undefined = $state();
   const showMinimap = $derived(nodes.length >= 6);
 
@@ -447,6 +467,10 @@
     }
     if (n.type === 'session') return 'mm mm-session';
     if (n.type === 'stack') return 'mm st-idle';
+    if (n.type === 'job') {
+      const t = world.backgroundTask(sessionId, (n.data as { taskId: string }).taskId);
+      return `mm st-${t ? BACKGROUND_STATUS[t.status].tone : 'idle'}`;
+    }
     return 'mm mm-container';
   }
 </script>
@@ -523,6 +547,16 @@
     </div>
   {/if}
 
+  {#if jobTipShown && jobTipTask}
+    {@const t = jobTipTask}
+    <div class="tip t-small" style="left: {jobTipShown.x + 14}px; top: {jobTipShown.y + 14}px" role="tooltip">
+      <p class="t-strong job-summary">{jobLabel(t)}</p>
+      <p>{BACKGROUND_STATUS[t.status].label} · {t.endedAt != null ? 'took ' : ''}{formatDuration(Math.max(0, (t.endedAt ?? clock.viewTime) - t.startedAt))}</p>
+      <p class="task">Background command · started {formatClock(t.startedAt)}</p>
+      {#if t.outputPath}<p class="task t-mono path">{t.outputPath}</p>{/if}
+    </div>
+  {/if}
+
   {#if graph.linkPopover}
     <SharedFilesPopover
       files={graph.linkPopover.files}
@@ -575,7 +609,9 @@
   .graph :global(.as-edge) { stroke: var(--border-strong); stroke-width: var(--edge-width); transition: stroke var(--dur-2) var(--ease-out); }
   .graph :global(.as-edge.run) { stroke-width: 2px; }
   .graph :global(.as-edge.sequence) { stroke: var(--border-default); stroke-width: 1px; }
+  .graph :global(.as-edge.job) { stroke: var(--border-strong); stroke-width: 1px; stroke-dasharray: 3 3; }
   .graph :global(.as-edge.active) { stroke: var(--state-running); stroke-dasharray: 6 6; animation: as-dash var(--dur-loop) linear infinite; }
+  .graph :global(.as-edge.job.active) { stroke-dasharray: 3 3; }
   .graph :global(.as-edge.hl) { stroke: var(--select-ring); stroke-width: 2px; }
   .graph :global(.as-arrow-head) { fill: var(--border-strong); }
   .graph :global(.as-shared) { stroke: var(--text-muted); stroke-opacity: 0.6; stroke-dasharray: 6 4; cursor: pointer; }
@@ -637,4 +673,6 @@
     pointer-events: none;
   }
   .tip .task { color: var(--text-secondary); margin-top: 2px; }
+  .tip .job-summary { overflow-wrap: anywhere; }
+  .tip .path { font-size: var(--text-xs); overflow-wrap: anywhere; }
 </style>

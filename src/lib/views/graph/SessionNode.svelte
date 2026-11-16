@@ -15,6 +15,7 @@
   const s = $derived(world.session(data.sessionId));
   const stats = $derived(s ? sessionStats(s) : null);
   const selected = $derived(selection.is('session', data.sessionId));
+  const commands = $derived(world.backgroundTasks(data.sessionId).length);
 </script>
 
 {#if s && stats}
@@ -30,7 +31,7 @@
         <span class="project t-mono ellipsis" title={s.cwd ?? ''}>{projectName(s.cwd)}</span>
         <StateBadge state={st} />
       </span>
-      <span class="counts t-small num">{stats.agents} {stats.agents === 1 ? 'agent' : 'agents'} · {stats.runs} {stats.runs === 1 ? 'run' : 'runs'}</span>
+      <span class="counts t-small num">{stats.agents} {stats.agents === 1 ? 'agent' : 'agents'} · {stats.runs} {stats.runs === 1 ? 'run' : 'runs'}{commands ? ` · ${commands} ${commands === 1 ? 'command' : 'commands'}` : ''}</span>
     </span>
   </button>
 {/if}

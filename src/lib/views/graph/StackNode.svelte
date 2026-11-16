@@ -1,11 +1,12 @@
 <script lang="ts">
-  // The agents the active view folded away under one parent or phase: how many finished, stopped
-  // or failed, and a way to bring them back. Reads live states by id, like AgentNode.
+  // The agents and background commands the active view folded away under one parent or phase:
+  // how many finished, stopped or failed, how many commands, and a way to bring them back. Reads
+  // live states by id, like AgentNode.
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
   import { world } from '../../stores/world.svelte';
   import { graph } from './graphState.svelte';
 
-  let { id, data, width }: NodeProps & { data: { sessionId: string; agentIds: string[]; expanded: boolean } } = $props();
+  let { id, data, width }: NodeProps & { data: { sessionId: string; agentIds: string[]; taskIds?: string[]; expanded: boolean } } = $props();
 
   const counts = $derived.by(() => {
     const c = { done: 0, stopped: 0, failed: 0 };
@@ -18,10 +19,16 @@
     }
     return c;
   });
-  const total = $derived(data.agentIds.length);
+  const commands = $derived(data.taskIds?.length ?? 0);
+  const total = $derived(data.agentIds.length + commands);
+  const what = $derived(
+    [data.agentIds.length ? `${data.agentIds.length} ${data.agentIds.length === 1 ? 'agent' : 'agents'}` : '', commands ? `${commands} ${commands === 1 ? 'command' : 'commands'}` : '']
+      .filter(Boolean)
+      .join(' and '),
+  );
   const narrow = $derived((width ?? 168) < 120);
   const parts = $derived(
-    [counts.done ? `${counts.done} finished` : '', counts.stopped ? `${counts.stopped} stopped` : '', counts.failed ? `${counts.failed} failed` : '']
+    [counts.done ? `${counts.done} finished` : '', counts.stopped ? `${counts.stopped} stopped` : '', counts.failed ? `${counts.failed} failed` : '', commands ? `${commands} ${commands === 1 ? 'command' : 'commands'}` : '']
       .filter(Boolean)
       .join(' · '),
   );
@@ -35,7 +42,7 @@
   class:open={data.expanded}
   class:narrow
   aria-expanded={data.expanded}
-  title={data.expanded ? `Fold these ${total} agents away again` : `Show these ${total} agents`}
+  title={data.expanded ? `Fold these ${what} away again` : `Show these ${what}`}
   onclick={toggle}
 >
   {#if narrow}

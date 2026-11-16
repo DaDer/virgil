@@ -2,7 +2,7 @@
 // A "tone" names a token family: --state-<tone>, --state-<tone>-text, --state-<tone>-soft,
 // and the CSS helper class .st-<tone>.
 
-import type { AgentState, PhaseState, RunStatus, Session } from './contract';
+import type { AgentState, BackgroundTaskStatus, PhaseState, RunStatus, Session } from './contract';
 
 export type Tone = 'queued' | 'running' | 'done' | 'error' | 'stopped' | 'idle';
 export type StateIconName = 'queued' | 'running' | 'waiting' | 'done' | 'error' | 'stopped' | 'unknown' | 'idle' | 'pending';
@@ -39,6 +39,15 @@ export const PHASE_STATE: Record<PhaseState, StateMeta> = {
   running: { label: 'Running', tone: 'running', icon: 'running' },
   done: { label: 'Done', tone: 'done', icon: 'done' },
   failed: { label: 'Failed', tone: 'error', icon: 'error' },
+};
+
+/** Background commands (data-contract 2.8). `unknown`: it ended without a notice. */
+export const BACKGROUND_STATUS: Record<BackgroundTaskStatus, StateMeta> = {
+  running: { label: 'Running', tone: 'running', icon: 'running' },
+  completed: { label: 'Done', tone: 'done', icon: 'done' },
+  failed: { label: 'Failed', tone: 'error', icon: 'error' },
+  stopped: { label: 'Stopped', tone: 'stopped', icon: 'stopped' },
+  unknown: { label: 'Ended, outcome unknown', tone: 'idle', icon: 'unknown' },
 };
 
 export type SessionState = 'busy' | 'waiting' | 'idle' | 'stale' | 'ended';

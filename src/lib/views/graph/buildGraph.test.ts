@@ -8,6 +8,8 @@ import {
   detailFor,
   gridFor,
   inFocus,
+  jobNodeId,
+  runNodeId,
   stackNodeId,
   agentNodeId,
   phaseNodeId,
@@ -18,7 +20,13 @@ import {
   type GNode,
 } from './buildGraph';
 import { fallbackLayout, fromElk, LayoutEngine, toElk } from './layout';
-import { makeRun } from '../../data/factories';
+import { makeBackgroundTask, makeRun } from '../../data/factories';
+import type { BackgroundTask, Session } from '../../contract';
+
+function addJob(s: Session, taskId: string, patch: Partial<BackgroundTask> = {}): Session {
+  s.backgroundTasks[taskId] = makeBackgroundTask({ taskId, sessionId: s.sessionId, summary: taskId, startedAt: T0 + 1000, ...patch });
+  return s;
+}
 
 const opts = (o: Partial<GraphOptions> = {}): GraphOptions => ({ detail: 'auto', zoom: 1, collapsed: {}, viewTime: T0 + 3_600_000, hideFuture: false, ...o });
 
@@ -244,5 +252,134 @@ describe('active focus', () => {
       expect(st.x + st.width).toBeLessThanOrEqual(phase.width);
       expect(st.y + st.height).toBeLessThanOrEqual(phase.height);
     }
+  });
+});
+
+describe('background commands', () => {
+  const now = T0 + 3_600_000;
+  const base = { sessionId: SID, kind: 'subagent' as const, parentAgentId: 'main', spawnDepth: 1, startedAt: T0 };
+  // Same shape as the active-focus fixture: live and recent agents, a failure, old ones that fold.
+  function session() {
+    const s = oneAgent();
+    const add = (agentId: string, patch: Record<string, unknown>) => {
+      s.agents[agentId] = { ...Object.values(s.agents).find((a) => a.agentId !== 'main')!, ...base, agentId, label: agentId, runId: null, phaseIndex: null, ...patch } as never;
+    };
+    for (const id of Object.keys(s.agents)) if (id !== 'main') delete s.agents[id];
+    add('live', { state: 'running', endedAt: null, lastActivityAt: now });
+    add('recent', { state: 'done', endedAt: now - 2 * 60_000 });
+    for (let i = 0; i < 4; i++) add(`old-${i}`, { state: 'done', endedAt: now - 45 * 60_000 });
+    add('old-grandchild', { state: 'done', endedAt: now - 45 * 60_000, parentAgentId: 'old-0', spawnDepth: 2 });
+    return s;
+  }
+  const active = (o: Partial<GraphOptions> = {}) => opts({ viewTime: now, focus: 'active', ...o });
+  const jobs = (m: ReturnType<typeof buildGraph>) => m.nodes.filter((n) => n.kind === 'job').map((n) => n.taskId).sort();
+  const drawn = (m: ReturnType<typeof buildGraph>) => m.nodes.filter((n) => n.kind === 'agent').map((n) => n.agentId).sort();
+
+  it('hangs a command off the agent that started it with a job edge; main-thread commands off the session', () => {
+    const s = addJob(addJob(session(), 't-live', { agentId: 'live' }), 't-main', { agentId: 'main', status: 'completed', endedAt: T0 + 5000 });
+    const g = buildGraph(s, opts({ viewTime: now }));
+    expect(g.nodes.find((n) => n.id === jobNodeId('t-live'))).toMatchObject({ kind: 'job', parent: null, width: SIZE.job.w, height: SIZE.job.h });
+    expect(g.edges.find((e) => e.target === jobNodeId('t-live'))).toMatchObject({ kind: 'job', source: agentNodeId('live'), taskId: 't-live' });
+    expect(g.edges.find((e) => e.target === jobNodeId('t-main'))).toMatchObject({ kind: 'job', source: SESSION_NODE });
+    expect(g.layout.edges.some((e) => e.source === agentNodeId('live') && e.target === jobNodeId('t-live'))).toBe(true);
+    expect(g.layout.nodes.some((n) => n.id === jobNodeId('t-main'))).toBe(true);
+  });
+
+  it("a workflow agent's command gets its layout edge from the run node", () => {
+    const s = addJob(sixtyAgents(), 't-w', { agentId: 'w3' });
+    const g = buildGraph(s, opts());
+    const rid = runNodeId('wf_00000000-001');
+    expect(g.edges.find((e) => e.kind === 'job')).toMatchObject({ source: agentNodeId('w3'), target: jobNodeId('t-w') });
+    expect(g.layout.edges).toContainEqual({ id: `${rid}>${jobNodeId('t-w')}`, source: rid, target: jobNodeId('t-w') });
+    // Collapsed, the run itself is the starter's node.
+    const c = buildGraph(s, opts({ collapsed: { 'wf_00000000-001': true } }));
+    expect(c.edges.find((e) => e.kind === 'job')?.source).toBe(rid);
+  });
+
+  it('active: a running command is drawn and keeps its finished starter in view', () => {
+    const s = addJob(session(), 't-run', { agentId: 'old-1' });
+    expect(inFocus(s, now)).toContain('old-1');
+    const m = buildGraph(s, active());
+    expect(jobs(m)).toEqual(['t-run']);
+    expect(drawn(m)).toContain('old-1');
+    expect(m.edges.find((e) => e.kind === 'job')?.source).toBe(agentNodeId('old-1'));
+  });
+
+  it('active: an old finished command folds into its owner\'s stack, shared with the folded agents', () => {
+    const s = addJob(session(), 't-old', { agentId: 'main', status: 'completed', endedAt: now - 40 * 60_000 });
+    const m = buildGraph(s, active());
+    expect(jobs(m)).toEqual([]);
+    const stacks = m.nodes.filter((n) => n.kind === 'stack');
+    expect(stacks).toHaveLength(1);
+    expect(stacks[0]).toMatchObject({ id: stackNodeId(SESSION_NODE), taskIds: ['t-old'] });
+    expect(stacks[0].agentIds).toHaveLength(5);
+    // A command that just ended is still drawn.
+    const recent = buildGraph(addJob(s, 't-recent', { status: 'completed', endedAt: now - 60_000 }), active());
+    expect(jobs(recent)).toEqual(['t-recent']);
+  });
+
+  it('active: a command on a drawn agent with nothing else folded gets a stack of its own', () => {
+    const s = addJob(session(), 't-old', { agentId: 'live', status: 'stopped', endedAt: now - 40 * 60_000 });
+    const m = buildGraph(s, active());
+    const st = m.nodes.find((n) => n.id === stackNodeId(agentNodeId('live')))!;
+    expect(st).toMatchObject({ kind: 'stack', agentIds: [], taskIds: ['t-old'] });
+    expect(m.edges.find((e) => e.target === st.id)).toMatchObject({ kind: 'job', source: agentNodeId('live') });
+    const open = buildGraph(s, active({ expanded: { [st.id]: true } }));
+    expect(jobs(open)).toEqual(['t-old']);
+  });
+
+  it('a failed command stays drawn for FAILED_KEEP_MS, then folds', () => {
+    const s = addJob(session(), 't-failed', { agentId: 'old-2', status: 'failed', endedAt: now - 30 * 60_000 });
+    const m = buildGraph(s, active());
+    expect(jobs(m)).toEqual(['t-failed']);
+    expect(m.edges.find((e) => e.kind === 'job')?.source).toBe(agentNodeId('old-2'));
+    s.backgroundTasks['t-failed'].endedAt = now - 90 * 60_000;
+    expect(jobs(buildGraph(s, active()))).toEqual([]);
+  });
+
+  it("a command whose starter is folded lands in the starter's stack; opening it draws the command", () => {
+    const s = addJob(session(), 't-gc', { agentId: 'old-grandchild', status: 'completed', endedAt: now - 40 * 60_000 });
+    const sid = stackNodeId(SESSION_NODE);
+    const m = buildGraph(s, active());
+    expect(m.nodes.filter((n) => n.kind === 'stack').map((n) => [n.id, n.taskIds])).toEqual([[sid, ['t-gc']]]);
+    const open = buildGraph(s, active({ expanded: { [sid]: true } }));
+    expect(jobs(open)).toEqual(['t-gc']);
+    expect(open.edges.find((e) => e.kind === 'job')?.source).toBe(agentNodeId('old-grandchild'));
+  });
+
+  it('a command of a folded workflow agent goes into that phase\'s stack cell', () => {
+    const s = sixtyAgents();
+    const run = Object.values(s.runs)[0];
+    for (const id of run.agentIds) Object.assign(s.agents[id], { state: 'done', endedAt: now - 30 * 60_000, lastActivityAt: now - 30 * 60_000 });
+    for (const id of ['p1', 'p2']) Object.assign(s.agents[id], { state: 'done', endedAt: now - 30 * 60_000, lastActivityAt: now - 30 * 60_000 });
+    const w = run.agentIds[0];
+    addJob(s, 't-w', { agentId: w, status: 'completed', endedAt: now - 20 * 60_000 });
+    const m = buildGraph(s, active());
+    const st = m.nodes.find((n) => n.kind === 'stack' && n.agentIds?.includes(w))!;
+    expect(st.parent).toBe(phaseNodeId(run.runId, s.agents[w].phaseIndex!));
+    expect(st.taskIds).toEqual(['t-w']);
+    expect(jobs(m)).toEqual([]);
+    expect(jobs(buildGraph(s, active({ expanded: { [st.id]: true } })))).toEqual(['t-w']);
+  });
+
+  it('a status change does not change the key; a new command does', () => {
+    const s = addJob(session(), 't1', { agentId: 'live' });
+    const k = buildGraph(s, opts({ viewTime: now })).key;
+    const ended = { ...s, backgroundTasks: { t1: { ...s.backgroundTasks.t1, status: 'failed' as const, endedAt: now - 1000, outputPath: '/tmp/x.output' } } };
+    expect(buildGraph(ended, opts({ viewTime: now })).key).toBe(k);
+    expect(buildGraph(addJob(structuredClone(s), 't2', { agentId: 'live' }), opts({ viewTime: now })).key).not.toBe(k);
+  });
+
+  it('replay hides commands that start after the view time', () => {
+    const s = addJob(addJob(session(), 'early', { startedAt: T0 + 1000 }), 'late', { startedAt: T0 + 60_000 });
+    expect(jobs(buildGraph(s, opts({ viewTime: T0 + 30_000, hideFuture: true })))).toEqual(['early']);
+    expect(jobs(buildGraph(s, opts({ viewTime: T0 + 30_000 })))).toEqual(['early', 'late']);
+  });
+
+  it('chainEdges ignores job edges', () => {
+    const s = addJob(addJob(session(), 't1', { agentId: 'live' }), 't-old', { agentId: 'live', status: 'completed', endedAt: now - 40 * 60_000 });
+    const g = buildGraph(s, active());
+    expect(g.edges.some((e) => e.kind === 'job')).toBe(true);
+    expect([...chainEdges(g, 'live')]).toEqual(['spawn:session>a:live']);
   });
 });

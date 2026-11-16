@@ -6,8 +6,10 @@
 //
 // The output `key` changes only when the structure changes (nodes, parents, sizes, edges).
 // State, token, tool and time updates never change it, so they never trigger a layout.
+//
+// Background commands (jobs) are small top-level nodes hanging off the agent that started them.
 
-import { MAIN_AGENT_ID, type Agent, type Phase, type Session, type WorkflowRun } from '../../contract';
+import { MAIN_AGENT_ID, type Agent, type BackgroundTask, type Phase, type Session, type WorkflowRun } from '../../contract';
 import { agentsByPhase } from '../../data/derive';
 import { startsAfter } from '../shared/motion';
 
@@ -22,6 +24,7 @@ export const SIZE = {
   runCollapsed: { w: 248, h: 72 },
   emptyPhase: { w: 168, h: 72 },
   stack: { w: 168, h: 56 },
+  job: { w: 184, h: 40 },
 } as const;
 
 /** In the active view, an agent that ended this recently is still drawn (faded by its node). */
@@ -54,7 +57,7 @@ export interface GraphOptions {
    * the rest into one stack per parent or phase. `all` (the default) draws every agent.
    */
   focus?: Focus;
-  /** Stacks the person opened, by stack node id: their agents are drawn again. */
+  /** Stacks the person opened, by stack node id: their agents and commands are drawn again. */
   expanded?: Record<string, boolean>;
   /** An agent to keep in view whatever its state (the selection). */
   keep?: string | null;
@@ -62,7 +65,7 @@ export interface GraphOptions {
   recentMs?: number;
 }
 
-export type NodeKind = 'session' | 'agent' | 'run' | 'phase' | 'stack';
+export type NodeKind = 'session' | 'agent' | 'run' | 'phase' | 'stack' | 'job';
 
 export interface GNode {
   id: string;
@@ -77,14 +80,17 @@ export interface GNode {
   agentId?: string;
   runId?: string;
   phaseIndex?: number;
+  /** Job nodes: the background command. */
+  taskId?: string;
   detail?: Detail;
   collapsed?: boolean;
-  /** Stack nodes: the agents folded into it, and whether it is opened. */
+  /** Stack nodes: the agents and background commands folded into it, and whether it is opened. */
   agentIds?: string[];
+  taskIds?: string[];
   expanded?: boolean;
 }
 
-export type EdgeKind = 'spawn' | 'run' | 'sequence';
+export type EdgeKind = 'spawn' | 'run' | 'sequence' | 'job';
 
 export interface GEdge {
   id: string;
@@ -94,6 +100,8 @@ export interface GEdge {
   /** The agent at the child end (spawn edges) or the run (run edges), for "active" state. */
   agentId?: string;
   runId?: string;
+  /** Job edges: the background command at the child end. */
+  taskId?: string;
 }
 
 export interface LayoutInput {
@@ -117,27 +125,42 @@ export const agentNodeId = (id: string) => `a:${id}`;
 export const runNodeId = (id: string) => `r:${id}`;
 export const phaseNodeId = (runId: string, index: number) => `p:${runId}:${index}`;
 export const stackNodeId = (ownerNodeId: string) => `s:${ownerNodeId}`;
+export const jobNodeId = (taskId: string) => `j:${taskId}`;
+
+/**
+ * Whether the active view draws a background command: while it runs, for `recentMs` after it
+ * ends, and for FAILED_KEEP_MS after it fails.
+ */
+export function jobInFocus(t: BackgroundTask, viewTime: number, recentMs = RECENT_MS): boolean {
+  if (t.status === 'running') return true;
+  const keepMs = t.status === 'failed' ? Math.max(FAILED_KEEP_MS, recentMs) : recentMs;
+  return (t.endedAt ?? t.startedAt) >= viewTime - keepMs;
+}
 
 /**
  * The agents the active view keeps in sight: working ones, ones that ended within RECENT_MS,
- * failures within FAILED_KEEP_MS, `keep`, and every ancestor of those.
+ * failures within FAILED_KEEP_MS, `keep`, the starters of background commands the view draws
+ * (jobInFocus), and every ancestor of those.
  */
 export function inFocus(s: Session, viewTime: number, keep?: string | null, recentMs = RECENT_MS): Set<string> {
   const out = new Set<string>();
-  for (const a of Object.values(s.agents)) {
-    if (a.agentId === MAIN_AGENT_ID) continue;
-    const ended = a.endedAt ?? a.lastActivityAt ?? 0;
-    const live = a.state === 'running' || a.state === 'waiting' || a.state === 'queued';
-    const failed = a.state === 'failed' && !a.superseded && ended >= viewTime - FAILED_KEEP_MS;
-    if (!(live || failed || ended >= viewTime - recentMs || a.agentId === keep)) continue;
-    let cur: Agent | undefined = a;
+  const add = (a: Agent | undefined) => {
+    let cur = a;
     const guard = new Set<string>();
     while (cur && cur.agentId !== MAIN_AGENT_ID && !guard.has(cur.agentId)) {
       guard.add(cur.agentId);
       out.add(cur.agentId);
       cur = cur.parentAgentId ? s.agents[cur.parentAgentId] : undefined;
     }
+  };
+  for (const a of Object.values(s.agents)) {
+    if (a.agentId === MAIN_AGENT_ID) continue;
+    const ended = a.endedAt ?? a.lastActivityAt ?? 0;
+    const live = a.state === 'running' || a.state === 'waiting' || a.state === 'queued';
+    const failed = a.state === 'failed' && !a.superseded && ended >= viewTime - FAILED_KEEP_MS;
+    if (live || failed || ended >= viewTime - recentMs || a.agentId === keep) add(a);
   }
+  for (const t of Object.values(s.backgroundTasks ?? {})) if (jobInFocus(t, viewTime, recentMs)) add(s.agents[t.agentId]);
   return out;
 }
 
@@ -191,6 +214,9 @@ export function buildGraph(s: Session, opts: GraphOptions): GraphModel {
   const edges: GEdge[] = [];
   const layoutEdges: LayoutInput['edges'] = [];
   const agentNode = new Map<string, string>();
+  /** Stack nodes by id, and the stack each folded agent is in (opened or not), for the jobs. */
+  const stackById = new Map<string, GNode>();
+  const foldedInto = new Map<string, string>();
   const visible = (a: Agent) => !(opts.hideFuture && startsAfter(a, opts.viewTime));
   const active = opts.focus === 'active';
   const focus = active ? inFocus(s, opts.viewTime, opts.keep, opts.recentMs) : null;
@@ -252,7 +278,7 @@ export function buildGraph(s: Session, opts: GraphOptions): GraphModel {
       topOf.set(pid, rid);
       if (folded.length) {
         const i = agents.length;
-        children.push({
+        const st: GNode = {
           id: sid,
           kind: 'stack',
           parent: pid,
@@ -264,7 +290,10 @@ export function buildGraph(s: Session, opts: GraphOptions): GraphModel {
           phaseIndex: ph.index,
           agentIds: folded.map((a) => a.agentId),
           expanded: open,
-        });
+        };
+        children.push(st);
+        stackById.set(sid, st);
+        for (const a of folded) foldedInto.set(a.agentId, sid);
         topOf.set(sid, rid);
         if (!open) for (const a of folded) {
           agentNode.set(a.agentId, sid);
@@ -346,14 +375,53 @@ export function buildGraph(s: Session, opts: GraphOptions): GraphModel {
     if (a && allPlainIds.has(agentId)) return ownerOf(a, plainIds);
     return agentNode.get(agentId) ?? SESSION_NODE;
   };
-  const stackEdges: { src: string; sid: string }[] = [];
+  const stackEdges: { src: string; sid: string; kind: EdgeKind }[] = [];
   for (const [owner, list] of stacks) {
     const sid = stackNodeId(owner);
     const open = !!expanded[sid];
-    nodes.push({ id: sid, kind: 'stack', parent: null, width: SIZE.stack.w, height: SIZE.stack.h, x: 0, y: 0, agentIds: list.map((a) => a.agentId), expanded: open });
+    const st: GNode = { id: sid, kind: 'stack', parent: null, width: SIZE.stack.w, height: SIZE.stack.h, x: 0, y: 0, agentIds: list.map((a) => a.agentId), expanded: open };
+    nodes.push(st);
+    stackById.set(sid, st);
     topOf.set(sid, sid);
+    for (const a of list) foldedInto.set(a.agentId, sid);
     if (!open) for (const a of list) agentNode.set(a.agentId, sid);
-    stackEdges.push({ src: owner, sid });
+    stackEdges.push({ src: owner, sid, kind: 'spawn' });
+  }
+
+  // Background commands, in start order. Out of focus, a command folds into the stack that holds
+  // its starter, else into the stack of its starter's node (shared with the starter's folded
+  // children; created when there is none). An opened stack draws its commands again.
+  const jobs = Object.values(s.backgroundTasks ?? {})
+    .filter((t) => !(opts.hideFuture && t.startedAt > opts.viewTime))
+    .sort((a, b) => a.startedAt - b.startedAt || a.taskId.localeCompare(b.taskId));
+  const drawnJobs: BackgroundTask[] = [];
+  for (const t of jobs) {
+    if (!active || jobInFocus(t, opts.viewTime, opts.recentMs)) {
+      drawnJobs.push(t);
+      continue;
+    }
+    const starter = agentNode.get(t.agentId) ?? SESSION_NODE;
+    const sid = foldedInto.get(t.agentId) ?? stackNodeId(starter);
+    let st = stackById.get(sid);
+    if (!st) {
+      st = { id: sid, kind: 'stack', parent: null, width: SIZE.stack.w, height: SIZE.stack.h, x: 0, y: 0, agentIds: [], expanded: !!expanded[sid] };
+      nodes.push(st);
+      stackById.set(sid, st);
+      topOf.set(sid, sid);
+      stackEdges.push({ src: starter, sid, kind: 'job' });
+    }
+    (st.taskIds ??= []).push(t.taskId);
+    if (expanded[sid]) {
+      st.expanded = true;
+      drawnJobs.push(t);
+    }
+  }
+  const jobDetail: Detail = detailFor(opts.detail, opts.zoom, 1) === 'dot' ? 'dot' : 'compact';
+  const jobSize = jobDetail === 'dot' ? SIZE.dot : SIZE.job;
+  for (const t of drawnJobs) {
+    const id = jobNodeId(t.taskId);
+    nodes.push({ id, kind: 'job', parent: null, width: jobSize.w, height: jobSize.h, x: 0, y: 0, taskId: t.taskId, detail: jobDetail });
+    topOf.set(id, id);
   }
 
   const seenLayout = new Set<string>();
@@ -373,14 +441,20 @@ export function buildGraph(s: Session, opts: GraphOptions): GraphModel {
     edges.push({ id: `spawn:${src}>${tgt}`, kind: 'spawn', source: src, target: tgt, agentId: a.agentId });
     addLayoutEdge(src, tgt);
   }
-  for (const { src, sid } of stackEdges) {
-    edges.push({ id: `stack:${src}>${sid}`, kind: 'spawn', source: src, target: sid });
+  for (const { src, sid, kind } of stackEdges) {
+    edges.push({ id: `stack:${src}>${sid}`, kind, source: src, target: sid });
     addLayoutEdge(src, sid);
   }
   for (const run of runs) {
     const src = parentNodeOf(run.parentAgentId);
     const tgt = runNodeId(run.runId);
     edges.push({ id: `run:${src}>${tgt}`, kind: 'run', source: src, target: tgt, runId: run.runId });
+    addLayoutEdge(src, tgt);
+  }
+  for (const t of drawnJobs) {
+    const src = agentNode.get(t.agentId) ?? SESSION_NODE;
+    const tgt = jobNodeId(t.taskId);
+    edges.push({ id: `job:${src}>${tgt}`, kind: 'job', source: src, target: tgt, taskId: t.taskId });
     addLayoutEdge(src, tgt);
   }
 
@@ -390,7 +464,7 @@ export function buildGraph(s: Session, opts: GraphOptions): GraphModel {
     edges: layoutEdges,
   };
   const key =
-    nodes.map((n) => `${n.id}|${n.parent ?? ''}|${n.width}x${n.height}|${n.x},${n.y}${n.agentIds ? `|${n.agentIds.length}${n.expanded ? 'o' : ''}` : ''}`).join(';') +
+    nodes.map((n) => `${n.id}|${n.parent ?? ''}|${n.width}x${n.height}|${n.x},${n.y}${n.agentIds ? `|${n.agentIds.length}+${n.taskIds?.length ?? 0}${n.expanded ? 'o' : ''}` : ''}`).join(';') +
     '#' +
     edges.map((e) => e.id).join(';');
   return { nodes, edges, layout, key, agentNode, agentCount: plainCount + runs.reduce((n, r) => n + r.agentIds.length, 0) };
@@ -400,7 +474,7 @@ export function buildGraph(s: Session, opts: GraphOptions): GraphModel {
 export function chainEdges(model: GraphModel, agentId: string): Set<string> {
   const out = new Set<string>();
   const byTarget = new Map<string, GEdge>();
-  for (const e of model.edges) if (e.kind !== 'sequence') byTarget.set(e.target, e);
+  for (const e of model.edges) if (e.kind !== 'sequence' && e.kind !== 'job') byTarget.set(e.target, e);
   let node = model.agentNode.get(agentId) ?? null;
   // Workflow agents link through their run container.
   const guard = new Set<string>();
