@@ -3,14 +3,26 @@
 // (copy on write), everything else is shared, so derived values can compare by reference.
 
 import {
+  BACKGROUND_TASKS_ENDED_MAX,
   RECENT_TOOLS_MAX,
   type Agent,
+  type BackgroundTask,
   type VirgilEvent,
   type FileEntry,
   type Session,
   type Snapshot,
   type SourceMode,
 } from '../contract';
+
+/** Task ids to drop so that at most BACKGROUND_TASKS_ENDED_MAX ended tasks remain: the oldest by
+ *  end time (start time when there is none), then start time, then id. Same rule as the core. */
+export function endedTasksOverCap(tasks: readonly BackgroundTask[]): string[] {
+  const ended = tasks.filter((b) => b.status !== 'running');
+  if (ended.length <= BACKGROUND_TASKS_ENDED_MAX) return [];
+  const key = (b: BackgroundTask) => b.endedAt ?? b.startedAt;
+  ended.sort((a, b) => key(a) - key(b) || a.startedAt - b.startedAt || (a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0));
+  return ended.slice(0, ended.length - BACKGROUND_TASKS_ENDED_MAX).map((b) => b.taskId);
+}
 
 export function emptySnapshot(mode: SourceMode = 'live'): Snapshot {
   return { seq: 0, t: 0, mode, sessions: {} };
@@ -64,6 +76,10 @@ class Draft {
     return (s.files = this.own(s.files));
   }
 
+  backgroundTasks(s: Session): Record<string, BackgroundTask> {
+    return (s.backgroundTasks = this.own(s.backgroundTasks));
+  }
+
   adopt<T extends object>(o: T): T {
     this.owned.add(o);
     return o;
@@ -90,8 +106,8 @@ function applyOne(d: Draft, e: VirgilEvent): void {
       const prev = all[e.session.sessionId];
       all[e.session.sessionId] = d.adopt(
         prev
-          ? { ...e.session, agents: prev.agents, runs: prev.runs, files: prev.files }
-          : { ...e.session, agents: {}, runs: {}, files: {} },
+          ? { ...e.session, agents: prev.agents, runs: prev.runs, files: prev.files, backgroundTasks: prev.backgroundTasks }
+          : { ...e.session, agents: {}, runs: {}, files: {}, backgroundTasks: {} },
       );
       return;
     }
@@ -178,6 +194,14 @@ function applyOne(d: Draft, e: VirgilEvent): void {
         const agents = d.agents(s);
         for (const a of e.agents) agents[a.agentId] = a;
       }
+      return;
+    }
+    case 'backgroundTaskUpserted': {
+      const s = d.session(e.sessionId);
+      if (!s) return;
+      const tasks = d.backgroundTasks(s);
+      tasks[e.task.taskId] = e.task;
+      if (e.task.status !== 'running') for (const id of endedTasksOverCap(Object.values(tasks))) delete tasks[id];
       return;
     }
   }

@@ -1,11 +1,13 @@
 // A deterministic, scripted scenario for the mock source: three sessions (two alive, one stale),
-// nested subagents, a plain subagent in a worktree, and a four-phase workflow run of 21 agent
-// attempts (20 agents plus one retry, one failure) that is finalised near the end.
+// nested subagents, a plain subagent in a worktree, a four-phase workflow run of 21 agent
+// attempts (20 agents plus one retry, one failure) that is finalised near the end, and background
+// commands (running, completed, failed, unknown) started by main threads and by agents.
 // Everything is invented; no real transcript content. The only randomness is a fixed-seed LCG.
 
 import {
   MAIN_AGENT_ID,
   type Agent,
+  type BackgroundTaskStatus,
   type VirgilEvent,
   type FileOp,
   type Phase,
@@ -14,7 +16,7 @@ import {
   type ToolCall,
   type WorkflowRun,
 } from '../contract';
-import { makeAgent, makeRun, makeSessionInfo, withPhaseStates } from './factories';
+import { makeAgent, makeBackgroundTask, makeRun, makeSessionInfo, withPhaseStates } from './factories';
 import { applyEvents, emptySnapshot } from './reducer';
 
 /** Length of one loop of the scenario. */
@@ -131,7 +133,7 @@ class Builder {
     this.at(rel, (snap) => {
       const s = snap.sessions[sessionId];
       if (!s) return [];
-      const { agents: _a, runs: _r, files: _f, ...info } = s;
+      const { agents: _a, runs: _r, files: _f, backgroundTasks: _b, ...info } = s;
       return [{ type: 'sessionUpserted', t: this.base + rel, session: { ...info, ...patch } }];
     });
   }
@@ -178,7 +180,7 @@ class Builder {
     this.update(rel, sessionId, agentId, (a) => ({ state, endedAt: t, lastActivityAt: Math.max(a.lastActivityAt ?? 0, t), ...extra }));
   }
 
-  tool(rel: number, sessionId: string, agentId: string, name: string, summary: string, opts: { dur?: number; error?: boolean; file?: { path: string; op: FileOp; bash?: boolean } } = {}): void {
+  tool(rel: number, sessionId: string, agentId: string, name: string, summary: string, opts: { dur?: number; error?: boolean; file?: { path: string; op: FileOp; bash?: boolean } } = {}): string {
     const t = this.base + rel;
     const id = this.toolId();
     const tokensDelta = this.rng.int(1800, 9000);
@@ -197,6 +199,31 @@ class Builder {
     });
     const end = rel + (opts.dur ?? this.rng.int(300, 2600));
     this.at(end, () => [{ type: 'toolCallFinished', t: this.base + end, sessionId, agentId, toolUseId: id, isError: !!opts.error }]);
+    return id;
+  }
+
+  /** A Bash call sent to the background: the call, then the task its result names. */
+  background(rel: number, sessionId: string, agentId: string, taskId: string, summary: string): void {
+    const dur = 400;
+    const toolUseId = this.tool(rel, sessionId, agentId, 'Bash', summary, { dur });
+    const t = this.base + rel + dur;
+    this.at(rel + dur, (snap) => {
+      if (!snap.sessions[sessionId]?.agents[agentId]) return [];
+      const task = makeBackgroundTask({ taskId, sessionId, agentId, toolUseId, summary, startedAt: t });
+      return [{ type: 'backgroundTaskUpserted', t, sessionId, task }];
+    });
+  }
+
+  /** A background command ends. A notice carries the output file; `unknown` has no notice. */
+  backgroundEnd(rel: number, sessionId: string, taskId: string, status: Exclude<BackgroundTaskStatus, 'running'>): void {
+    const t = this.base + rel;
+    this.at(rel, (snap) => {
+      const s = snap.sessions[sessionId];
+      const task = s?.backgroundTasks[taskId];
+      if (!task) return [];
+      const outputPath = status === 'unknown' ? null : `/tmp/claude-1000/${s.projectSlug}/${sessionId}/tasks/${taskId}.output`;
+      return [{ type: 'backgroundTaskUpserted', t, sessionId, task: { ...task, status, endedAt: t, outputPath } }];
+    });
   }
 
   /** A run of plausible tool calls between two relative times. */
@@ -489,6 +516,24 @@ export function buildScenario(base: number): VirgilEvent[] {
     startedAt: T(-7200), lastActivityAt: T(-7200),
   });
   b.work(s5, MAIN_AGENT_ID, -7000 * S, -730 * S, ['src/search/index.ts', 'src/components/SearchBox.astro', 'astro.config.mjs'].map((f) => `${DOCS}/${f}`), DOCS, { gap: [60_000, 300_000] });
+
+  // ---------- background commands ----------
+  // Added last so the earlier random draws, and with them every id and time above, stay the same.
+  b.background(2 * S, s1, MAIN_AGENT_ID, 'b7dev2k4q', 'Start the dev server');
+  b.background(6 * S, s1, explore, 'b3idx8m1w', 'Index the source tree');
+  b.backgroundEnd(19 * S, s1, 'b3idx8m1w', 'completed');
+  const tests = byLabel.get('build:tests')!;
+  b.background(100 * S, s1, tests, 'b5api0t9r', 'Run the API tests in watch mode');
+  b.backgroundEnd(151 * S, s1, 'b5api0t9r', 'failed');
+  b.background(324 * S, s1, MAIN_AGENT_ID, 'b9all6s3e', 'Run the full test suite');
+  b.backgroundEnd(336 * S, s1, 'b9all6s3e', 'completed');
+  b.background(-900 * S, s2, MAIN_AGENT_ID, 'b2lnk5c8h', 'Check the links');
+  b.backgroundEnd(-884 * S, s2, 'b2lnk5c8h', 'failed');
+  b.background(241 * S, s2, MAIN_AGENT_ID, 'b4bld1n6v', 'Build the site');
+  b.backgroundEnd(262 * S, s2, 'b4bld1n6v', 'completed');
+  // The scratch session went away with a command still running: it never sent a notice.
+  b.background(-11_000 * S, s3, MAIN_AGENT_ID, 'b6tail3p0', 'Tail the parser log');
+  b.backgroundEnd(-10_800 * S, s3, 'b6tail3p0', 'unknown');
 
   return b.build();
 }

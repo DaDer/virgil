@@ -293,6 +293,9 @@ pub struct Notice {
     pub task_id: String,
     pub tool_use_id: Option<String>,
     pub status: Option<String>,
+    /// `<output-file>` of a background command's notice: where Claude Code wrote its output. Only
+    /// the path is kept; Virgil never reads the file.
+    pub output_file: Option<String>,
     /// The agent stopped but has background work of its own and may resume: Claude Code still
     /// reports `completed`, and says so only in the summary and the note.
     pub still_working: bool,
@@ -376,6 +379,7 @@ pub fn parse_notice(content: &str) -> Option<Notice> {
         task_id,
         tool_use_id: xml_tag(content, "tool-use-id").map(str::to_string),
         status: xml_tag(content, "status").map(str::to_string),
+        output_file: xml_tag(content, "output-file").map(str::to_string).filter(|p| !p.is_empty()),
         still_working: content.contains("waiting on its own background work")
             || content.contains("background work of its own still running"),
     })
@@ -518,6 +522,16 @@ mod tests {
         assert!(m.finished);
         assert_eq!(parse_session_file(br#"{"pid":1}"#), None);
         assert_eq!(parse_session_file(br#"{"sessionId":"s","pid":-4}"#).unwrap().pid, None);
+    }
+
+    #[test]
+    fn parses_a_background_command_notice() {
+        let n = parse_notice("<task-notification>\n<task-id>b1</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n<output-file>/tmp/s/tasks/b1.output</output-file>\n<status>failed</status>\n<summary>Background command \"Run\" failed with exit code 2</summary>\n</task-notification>").unwrap();
+        assert_eq!(n.task_id, "b1");
+        assert_eq!(n.tool_use_id.as_deref(), Some("toolu_1"));
+        assert_eq!(n.output_file.as_deref(), Some("/tmp/s/tasks/b1.output"));
+        assert_eq!(n.status.as_deref(), Some("failed"));
+        assert_eq!(parse_notice("<task-notification><task-id>a1</task-id></task-notification>").unwrap().output_file, None);
     }
 
     #[test]

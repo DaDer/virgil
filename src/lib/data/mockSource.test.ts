@@ -30,6 +30,16 @@ describe('scenario', () => {
     expect(JSON.stringify(buildScenario(0))).toBe(JSON.stringify(buildScenario(0)));
   });
 
+  test('has background commands in mixed states, from main threads and agents', () => {
+    const events = buildScenario(0);
+    const mid = Object.values(scenarioAt(events, 120_000).sessions[SESSION_ORCHARD].backgroundTasks);
+    expect(mid.map((b) => b.status).sort()).toEqual(['completed', 'running', 'running']);
+    const all = Object.values(scenarioAt(events, SCENARIO_DURATION).sessions).flatMap((s) => Object.values(s.backgroundTasks));
+    expect(new Set(all.map((b) => b.status))).toEqual(new Set(['running', 'completed', 'failed', 'unknown']));
+    expect(all.some((b) => b.agentId === 'main') && all.some((b) => b.agentId !== 'main')).toBe(true);
+    expect(all.filter((b) => b.status === 'failed' || b.status === 'completed').every((b) => b.outputPath && b.endedAt)).toBe(true);
+  });
+
   test('ends with a finalised four-phase run of about twenty agents', () => {
     const events = buildScenario(0);
     const end = scenarioAt(events, SCENARIO_DURATION);

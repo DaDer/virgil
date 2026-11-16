@@ -15,8 +15,10 @@ pub mod hub;
 pub mod source;
 
 pub use contract::*;
-pub use attention::{AttentionItem, AttentionKind};
-pub use engine::{BackgroundTask, Engine, EngineConfig, EngineStats, SessionExtras};
+pub use attention::{AttentionBackground, AttentionItem, AttentionKind};
+// `engine::BackgroundTask` (the attention list's running command) is not re-exported here, so
+// `BackgroundTask` at the crate root is the contract type.
+pub use engine::{Engine, EngineConfig, EngineStats, SessionExtras};
 pub use hub::{default_recording_dirs, Hub};
 pub use source::{list_recordings, resolve_claude_dir, ChangeOp, FileChange, FileView, LiveConfig, LiveSource, ReplaySource, Source};
 

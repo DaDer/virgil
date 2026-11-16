@@ -11,7 +11,7 @@
 use crate::adapter::bash;
 use crate::adapter::records::{
     complete_lines, parse_journal_line, parse_meta, parse_notice, parse_record, parse_run_file,
-    parse_session_file, AgentMeta, JournalLine, Record, RunFile, RunFileAgent, SessionFile, ToolUse, WorkflowLaunch,
+    parse_session_file, AgentMeta, JournalLine, Notice, Record, RunFile, RunFileAgent, SessionFile, ToolUse, WorkflowLaunch,
 };
 use crate::adapter::script::{extract_meta, DeclaredPhase};
 use crate::adapter::text::{self, cut};
@@ -27,6 +27,9 @@ const READ_CHUNK: u64 = 4 * 1024 * 1024;
 /// Default for [`EngineConfig::quiet_after_ms`]: 30 minutes.
 pub const QUIET_AFTER_MS: i64 = 30 * 60 * 1000;
 const NOTICE_GRACE_MS: i64 = 1000;
+/// A background command with no end after this long, by the source clock, is assumed to have
+/// ended without a notice (status `unknown`).
+pub const BACKGROUND_MAX_MS: i64 = 12 * 3_600_000;
 const STATE_REASON_MAX: usize = 200;
 
 #[derive(Debug, Clone)]
@@ -73,9 +76,11 @@ struct Track {
     stamp: Option<(Option<u64>, Option<EpochMs>)>,
 }
 
-/// A background command a session started and has not heard back from.
+/// A background command a session started and has not heard back from (for the attention list;
+/// the snapshot carries [`crate::contract::BackgroundTask`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BackgroundTask {
+    pub task_id: String,
     pub summary: String,
     pub started_at: EpochMs,
     /// The agent that started it (`main` for the main thread).
@@ -88,6 +93,39 @@ pub struct SessionExtras {
     pub last_text: Option<String>,
     pub last_stop: Option<String>,
     pub background: Vec<BackgroundTask>,
+}
+
+/// A background command as read: its start, and its end once a notice or a TaskStop says so.
+struct TaskInt {
+    agent_id: String,
+    tool_use_id: Option<String>,
+    summary: String,
+    started_at: EpochMs,
+    end: Option<TaskEnd>,
+    /// Set by the clock sweep: no end after [`BACKGROUND_MAX_MS`].
+    expired: bool,
+}
+
+#[derive(Clone)]
+struct TaskEnd {
+    status: BackgroundTaskStatus,
+    at: EpochMs,
+    tool_use_id: Option<String>,
+    output_path: Option<String>,
+    /// From a notice, not a TaskStop. A notice replaces any end; a TaskStop only fills a missing one.
+    from_notice: bool,
+}
+
+impl TaskEnd {
+    fn from_notice(n: &Notice, at: EpochMs) -> TaskEnd {
+        let status = match n.status.as_deref() {
+            Some("completed") => BackgroundTaskStatus::Completed,
+            Some("failed") => BackgroundTaskStatus::Failed,
+            Some("killed") | Some("stopped") => BackgroundTaskStatus::Stopped,
+            _ => BackgroundTaskStatus::Unknown,
+        };
+        TaskEnd { status, at, tool_use_id: n.tool_use_id.clone(), output_path: n.output_file.clone(), from_notice: true }
+    }
 }
 
 #[derive(Clone)]
@@ -269,11 +307,12 @@ struct SessionInt {
     agents: BTreeMap<String, AgentInt>,
     runs: BTreeMap<String, RunInt>,
     notices: HashMap<String, NoticeInt>,
-    /// Background commands still running: task id -> what it is and when it started.
-    background: BTreeMap<String, BackgroundTask>,
-    /// Task ids that ended (a notice or a TaskStop). Files are read in no particular order, so the
+    /// Background commands, running and ended (at most BACKGROUND_TASKS_ENDED_MAX ended): task id ->
+    /// what it is, when it started and how it ended.
+    background: BTreeMap<String, TaskInt>,
+    /// How each task id ended (a notice or a TaskStop). Files are read in no particular order, so the
     /// end of a command can be seen before its start.
-    ended_tasks: HashSet<String>,
+    ended_tasks: HashMap<String, TaskEnd>,
     /// Workflow tool_use id -> (inline script, meta.name).
     workflow_inputs: HashMap<String, (Option<String>, Option<String>)>,
 }
@@ -293,14 +332,50 @@ impl SessionInt {
             runs: BTreeMap::new(),
             notices: HashMap::new(),
             background: BTreeMap::new(),
-            ended_tasks: HashSet::new(),
+            ended_tasks: HashMap::new(),
             workflow_inputs: HashMap::new(),
         }
     }
 
-    fn end_task(&mut self, task_id: &str) {
-        self.background.remove(task_id);
-        self.ended_tasks.insert(task_id.to_string());
+    fn end_task(&mut self, task_id: &str, end: TaskEnd) {
+        end_task(&mut self.background, &mut self.ended_tasks, task_id, end);
+    }
+
+    /// Status and end time of a background command. One with no end is `unknown` once the agent
+    /// that started it has ended (for main: the session is stale) or after [`BACKGROUND_MAX_MS`].
+    fn task_status(&self, b: &TaskInt) -> (BackgroundTaskStatus, Option<EpochMs>) {
+        if let Some(e) = &b.end {
+            return (e.status, Some(e.at));
+        }
+        let agent_end = self.agents.get(&b.agent_id).and_then(|a| {
+            self.agent_state(a).0.is_terminal().then(|| a.ended_at.or(a.last_activity_at).unwrap_or(b.started_at))
+        });
+        if let Some(at) = agent_end {
+            return (BackgroundTaskStatus::Unknown, Some(at.max(b.started_at)));
+        }
+        if self.stale() {
+            return (BackgroundTaskStatus::Unknown, Some(b.started_at));
+        }
+        if b.expired {
+            return (BackgroundTaskStatus::Unknown, Some(b.started_at + BACKGROUND_MAX_MS));
+        }
+        (BackgroundTaskStatus::Running, None)
+    }
+
+    fn build_task(&self, task_id: &str, b: &TaskInt) -> crate::contract::BackgroundTask {
+        let (status, ended_at) = self.task_status(b);
+        let end = b.end.as_ref();
+        crate::contract::BackgroundTask {
+            task_id: task_id.to_string(),
+            session_id: self.id.clone(),
+            agent_id: b.agent_id.clone(),
+            tool_use_id: b.tool_use_id.clone().or_else(|| end.and_then(|e| e.tool_use_id.clone())),
+            summary: b.summary.clone(),
+            status,
+            started_at: b.started_at,
+            ended_at,
+            output_path: end.and_then(|e| e.output_path.clone()),
+        }
     }
 
     fn base(&self) -> Option<String> {
@@ -681,6 +756,20 @@ impl SessionInt {
     }
 }
 
+/// Records how a background command ended, on the task when its start is known and for a start
+/// read later. Takes the two maps so it can run while an agent of the session is borrowed.
+fn end_task(background: &mut BTreeMap<String, TaskInt>, ended: &mut HashMap<String, TaskEnd>, task_id: &str, end: TaskEnd) {
+    let keep = |old: Option<&TaskEnd>| old.is_some_and(|o| o.from_notice && !end.from_notice);
+    if let Some(b) = background.get_mut(task_id) {
+        if !keep(b.end.as_ref()) {
+            b.end = Some(end.clone());
+        }
+    }
+    if !keep(ended.get(task_id)) {
+        ended.insert(task_id.to_string(), end);
+    }
+}
+
 fn activity(a: &AgentInt) -> AgentState {
     if a.last_stop.as_deref().is_some_and(|s| s != "tool_use") {
         return AgentState::Waiting;
@@ -811,11 +900,30 @@ impl Engine {
         }
     }
 
+    /// Marks background commands with no end that started [`BACKGROUND_MAX_MS`] before `now` as
+    /// expired, and sessions whose flags changed dirty.
+    fn sweep_tasks(&mut self, now: EpochMs) {
+        for s in self.sessions.values_mut().filter(|s| s.visible) {
+            let mut changed = false;
+            for b in s.background.values_mut() {
+                let expired = b.end.is_none() && now.saturating_sub(b.started_at) >= BACKGROUND_MAX_MS;
+                if expired != b.expired {
+                    b.expired = expired;
+                    changed = true;
+                }
+            }
+            if changed {
+                self.dirty.insert(s.id.clone());
+            }
+        }
+    }
+
     /// Re-evaluates the time-based rules at the source's `now` and emits what changed. The shell
     /// calls this (through the hub) on every tick, so states move even when no file changes.
     pub fn refresh_clock(&mut self, src: &dyn Source) {
         let t = src.now();
         self.sweep_quiet(t);
+        self.sweep_tasks(t);
         self.flush(t);
     }
 
@@ -831,17 +939,18 @@ impl Engine {
                     SessionExtras {
                         last_text: main.and_then(|a| a.last_text.clone()),
                         last_stop: main.and_then(|a| a.last_stop.clone()),
-                        // A command started by an agent that has since ended no longer counts.
+                        // Only running commands: one started by an agent that has since ended no
+                        // longer counts.
                         background: s
                             .background
-                            .values()
-                            .filter(|b| {
-                                b.agent_id == MAIN_AGENT_ID
-                                    || s.agents.get(&b.agent_id).is_some_and(|a| {
-                                        !matches!(s.agent_state(a).0, AgentState::Done | AgentState::Failed | AgentState::Stopped)
-                                    })
+                            .iter()
+                            .filter(|(_, b)| s.task_status(b).0 == BackgroundTaskStatus::Running)
+                            .map(|(task_id, b)| BackgroundTask {
+                                task_id: task_id.clone(),
+                                summary: b.summary.clone(),
+                                started_at: b.started_at,
+                                agent_id: b.agent_id.clone(),
                             })
-                            .cloned()
                             .collect(),
                     },
                 )
@@ -984,6 +1093,7 @@ impl Engine {
         }
         self.deadline = None;
         self.sweep_quiet(src.now());
+        self.sweep_tasks(src.now());
         self.flush(last_t);
         self.queue.is_empty()
     }
@@ -1504,24 +1614,29 @@ impl Engine {
                 }
             }
             Record::Notice { ts, notice } => {
-                s.end_task(&notice.task_id);
+                s.end_task(&notice.task_id, TaskEnd::from_notice(&notice, ts.unwrap_or(t_obs)));
                 s.notices.insert(notice.task_id.clone(), NoticeInt { status: notice.status, ts, still_working: notice.still_working });
             }
             Record::User { ts, text, results, workflow_launch, background_task_id, .. } => {
-                if let Some(task_id) = background_task_id.filter(|id| !s.ended_tasks.contains(id)) {
-                    let summary = results
-                        .first()
-                        .and_then(|r| s.agents.get(agent_id)?.recent.iter().find(|c| c.tool_use_id == r.tool_use_id))
+                if let Some(task_id) = background_task_id.filter(|id| !s.background.contains_key(id)) {
+                    let tool_use_id = results.first().map(|r| r.tool_use_id.clone());
+                    let summary = tool_use_id
+                        .as_ref()
+                        .and_then(|id| s.agents.get(agent_id)?.recent.iter().find(|c| &c.tool_use_id == id))
                         .map(|c| c.summary.clone())
                         .unwrap_or_default();
-                    s.background.insert(task_id, BackgroundTask { summary, started_at: ts.unwrap_or(t_obs), agent_id: agent_id.to_string() });
+                    let end = s.ended_tasks.get(&task_id).cloned();
+                    let started_at = ts.unwrap_or(t_obs);
+                    s.background.insert(
+                        task_id,
+                        TaskInt { agent_id: agent_id.to_string(), tool_use_id, summary, started_at, end, expired: false },
+                    );
                 }
                 let Some(a) = s.agents.get_mut(agent_id) else { return };
                 a.touch_time(ts);
                 if let Some(text) = &text {
                     if let Some(n) = parse_notice(text) {
-                        s.background.remove(&n.task_id);
-                        s.ended_tasks.insert(n.task_id.clone());
+                        end_task(&mut s.background, &mut s.ended_tasks, &n.task_id, TaskEnd::from_notice(&n, ts.unwrap_or(t_obs)));
                         s.notices.insert(n.task_id.clone(), NoticeInt { status: n.status, ts, still_working: n.still_working });
                     } else {
                         apply_task_rule(a, text);
@@ -1596,7 +1711,14 @@ impl Engine {
         }
         if tu.name == "TaskStop" {
             if let Some(id) = tu.input.get("task_id").and_then(|v| v.as_str()) {
-                s.end_task(id);
+                let end = TaskEnd {
+                    status: BackgroundTaskStatus::Stopped,
+                    at: t,
+                    tool_use_id: None,
+                    output_path: None,
+                    from_notice: false,
+                };
+                s.end_task(id, end);
             }
         }
         let a = s.agents.get_mut(agent_id).unwrap();
@@ -1714,6 +1836,17 @@ impl Engine {
             let info = s.info();
             let agents: Vec<Agent> = s.agents.values().map(|a| s.build_agent(a)).collect();
             let runs: Vec<WorkflowRun> = s.runs.values().map(|r| s.build_run(r)).collect();
+            let mut tasks: Vec<crate::contract::BackgroundTask> =
+                s.background.iter().map(|(id, b)| s.build_task(id, b)).collect();
+            // Keep the newest ended tasks only; the reducer drops the same ones from the snapshot.
+            let over = ended_tasks_over_cap(&tasks);
+            if !over.is_empty() {
+                tasks.retain(|b| !over.contains(&b.task_id));
+                let s = self.sessions.get_mut(&sid).unwrap();
+                for id in &over {
+                    s.background.remove(id);
+                }
+            }
             let snap = self.snapshot.sessions.get(&sid);
             if snap.map(|ss| &ss.info) != Some(&info) {
                 self.emit(t, EventKind::SessionUpserted { session: info });
@@ -1738,6 +1871,12 @@ impl Engine {
                     (true, true) => {}
                     (true, false) => self.emit(t, EventKind::RunUpdated { session_id, run }),
                     (false, _) => self.emit(t, EventKind::RunStarted { session_id, run }),
+                }
+            }
+            for task in tasks {
+                let old = self.snapshot.sessions.get(&sid).and_then(|ss| ss.background_tasks.get(&task.task_id));
+                if old != Some(&task) {
+                    self.emit(t, EventKind::BackgroundTaskUpserted { session_id: sid.clone(), task: Box::new(task) });
                 }
             }
         }
@@ -2095,6 +2234,159 @@ mod tests {
         change(&mut e, &src, &format!("{sub}/agent-a1.jsonl"));
         change(&mut e, &src, MAIN);
         assert_eq!(state(&e), (AgentState::Done, None));
+    }
+
+    // ---------- background commands ----------
+
+    /// 2026-01-01T00:00:00Z plus `sec` seconds (under an hour), as transcripts write it.
+    fn iso(sec: i64) -> String {
+        format!("2026-01-01T00:{:02}:{:02}.000Z", sec / 60, sec % 60)
+    }
+    const T00: EpochMs = 1_767_225_600_000;
+
+    /// A Bash call sent to the background, and the result that names its task id.
+    fn bg_start(sec: i64, tool_use_id: &str, task_id: &str, description: &str) -> String {
+        let call = format!(
+            r#"{{"type":"assistant","timestamp":"{ts}","message":{{"id":"m-{tool_use_id}","stop_reason":"tool_use","content":[{{"type":"tool_use","id":"{tool_use_id}","name":"Bash","input":{{"command":"npm test\nmore","description":"{description}","run_in_background":true}}}}]}}}}"#,
+            ts = iso(sec)
+        );
+        let result = format!(
+            r#"{{"type":"user","timestamp":"{ts}","message":{{"content":[{{"type":"tool_result","tool_use_id":"{tool_use_id}","content":"Command running in background"}}]}},"toolUseResult":{{"stdout":"","stderr":"","backgroundTaskId":"{task_id}"}}}}"#,
+            ts = iso(sec)
+        );
+        format!("{call}\n{result}\n")
+    }
+
+    /// A `<task-notification>` for a background command, as a queued notice.
+    fn bg_notice(sec: i64, task_id: &str, status: &str) -> String {
+        let content = format!(
+            "<task-notification>\\n<task-id>{task_id}</task-id>\\n<tool-use-id>toolu_n</tool-use-id>\\n<output-file>/tmp/s1/tasks/{task_id}.output</output-file>\\n<status>{status}</status>\\n<summary>Background command \\\"x\\\" {status}</summary>\\n</task-notification>"
+        );
+        format!(r#"{{"type":"queue-operation","operation":"enqueue","timestamp":"{}","content":"{content}"}}"#, iso(sec)) + "\n"
+    }
+
+    fn bg(e: &Engine, task_id: &str) -> crate::contract::BackgroundTask {
+        e.snapshot().sessions["s1"].background_tasks[task_id].clone()
+    }
+
+    fn running_count(e: &Engine) -> usize {
+        e.session_extras().get("s1").map_or(0, |x| x.background.len())
+    }
+
+    #[test]
+    fn background_command_runs_then_fails_and_keeps_its_output_path() {
+        let (src, mut e) = setup();
+        src.append(MAIN, bg_start(1, "toolu_b1", "b1", "Run the tests").as_bytes());
+        change(&mut e, &src, MAIN);
+        let t = bg(&e, "b1");
+        assert_eq!(
+            (t.status, t.agent_id.as_str(), t.tool_use_id.as_deref(), t.summary.as_str(), t.started_at, t.ended_at),
+            (BackgroundTaskStatus::Running, MAIN_AGENT_ID, Some("toolu_b1"), "Run the tests", T00 + 1_000, None)
+        );
+        assert_eq!(running_count(&e), 1);
+        assert!(e.take_events().iter().any(|ev| ev.kind.type_name() == "backgroundTaskUpserted"));
+
+        src.append(MAIN, bg_notice(30, "b1", "failed").as_bytes());
+        change(&mut e, &src, MAIN);
+        let t = bg(&e, "b1");
+        assert_eq!((t.status, t.ended_at), (BackgroundTaskStatus::Failed, Some(T00 + 30_000)));
+        assert_eq!(t.output_path.as_deref(), Some("/tmp/s1/tasks/b1.output"));
+        assert_eq!(t.tool_use_id.as_deref(), Some("toolu_b1"), "the start's call id is kept");
+        assert_eq!(running_count(&e), 0);
+        // Nothing changed: no further event.
+        e.take_events();
+        change(&mut e, &src, MAIN);
+        assert!(e.take_events().is_empty());
+    }
+
+    #[test]
+    fn background_command_end_read_before_its_start() {
+        let (src, mut e) = setup();
+        let sub = "projects/-p/s1/subagents";
+        src.put(MAIN, bg_notice(40, "b2", "completed").as_bytes());
+        change(&mut e, &src, MAIN);
+        assert!(e.snapshot().sessions["s1"].background_tasks.is_empty(), "an end alone is not a task");
+        src.put(&format!("{sub}/agent-a1.meta.json"), br#"{"agentType":"general-purpose","description":"x"}"#);
+        src.put(&format!("{sub}/agent-a1.jsonl"), bg_start(2, "toolu_b2", "b2", "Build").as_bytes());
+        change(&mut e, &src, &format!("{sub}/agent-a1.meta.json"));
+        change(&mut e, &src, &format!("{sub}/agent-a1.jsonl"));
+        let t = bg(&e, "b2");
+        assert_eq!((t.status, t.agent_id.as_str(), t.ended_at), (BackgroundTaskStatus::Completed, "a1", Some(T00 + 40_000)));
+        assert_eq!(t.output_path.as_deref(), Some("/tmp/s1/tasks/b2.output"));
+        assert_eq!(running_count(&e), 0);
+    }
+
+    #[test]
+    fn task_stop_stops_a_background_command_and_a_later_notice_refines_it() {
+        let (src, mut e) = setup();
+        src.append(MAIN, bg_start(1, "toolu_b3", "b3", "Serve").as_bytes());
+        let stop = format!(
+            r#"{{"type":"assistant","timestamp":"{}","message":{{"id":"m-stop","stop_reason":"tool_use","content":[{{"type":"tool_use","id":"toolu_stop","name":"TaskStop","input":{{"task_id":"b3"}}}}]}}}}"#,
+            iso(20)
+        );
+        src.append(MAIN, format!("{stop}\n").as_bytes());
+        change(&mut e, &src, MAIN);
+        let t = bg(&e, "b3");
+        assert_eq!((t.status, t.ended_at, t.output_path.as_deref()), (BackgroundTaskStatus::Stopped, Some(T00 + 20_000), None));
+        assert_eq!(running_count(&e), 0);
+        src.append(MAIN, bg_notice(21, "b3", "killed").as_bytes());
+        change(&mut e, &src, MAIN);
+        let t = bg(&e, "b3");
+        assert_eq!((t.status, t.ended_at), (BackgroundTaskStatus::Stopped, Some(T00 + 21_000)));
+        assert_eq!(t.output_path.as_deref(), Some("/tmp/s1/tasks/b3.output"));
+    }
+
+    #[test]
+    fn background_command_without_a_notice_is_unknown_once_its_agent_ends_or_after_twelve_hours() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let (src, mut e) = setup();
+        let sub = "projects/-p/s1/subagents";
+        src.now.store(T00 + 60_000, SeqCst);
+        src.put(&format!("{sub}/agent-a1.meta.json"), br#"{"agentType":"general-purpose","description":"x"}"#);
+        src.put(&format!("{sub}/agent-a1.jsonl"), bg_start(2, "toolu_b4", "b4", "Watch").as_bytes());
+        src.append(MAIN, bg_start(3, "toolu_b5", "b5", "Main watch").as_bytes());
+        for p in [format!("{sub}/agent-a1.meta.json"), format!("{sub}/agent-a1.jsonl"), MAIN.to_string()] {
+            change(&mut e, &src, &p);
+        }
+        assert_eq!(bg(&e, "b4").status, BackgroundTaskStatus::Running);
+        assert_eq!(running_count(&e), 2);
+        // The agent finishes without a notice for its command.
+        src.put(&format!("{sub}/agent-a1.meta.json"), br#"{"agentType":"general-purpose","description":"x","finished":true}"#);
+        change(&mut e, &src, &format!("{sub}/agent-a1.meta.json"));
+        let t = bg(&e, "b4");
+        let agent_end = e.snapshot().sessions["s1"].agents["a1"].ended_at;
+        assert_eq!((t.status, t.ended_at), (BackgroundTaskStatus::Unknown, agent_end));
+        assert_eq!(running_count(&e), 1);
+        // The main thread's command has no end twelve hours on.
+        src.now.store(T00 + 3_000 + BACKGROUND_MAX_MS, SeqCst);
+        e.refresh_clock(&src);
+        let t = bg(&e, "b5");
+        assert_eq!((t.status, t.ended_at), (BackgroundTaskStatus::Unknown, Some(T00 + 3_000 + BACKGROUND_MAX_MS)));
+        assert_eq!(running_count(&e), 0);
+    }
+
+    #[test]
+    fn only_the_newest_ended_background_commands_are_kept() {
+        let (src, mut e) = setup();
+        let n = BACKGROUND_TASKS_ENDED_MAX as i64 + 5;
+        let mut log = bg_start(0, "toolu_run", "run", "Still going");
+        for i in 0..n {
+            log += &bg_start(1 + 2 * i, &format!("toolu_{i}"), &format!("b{i:03}"), "Short");
+            log += &bg_notice(2 + 2 * i, &format!("b{i:03}"), "completed");
+        }
+        src.put(MAIN, log.as_bytes());
+        change(&mut e, &src, MAIN);
+        let kept = e.snapshot().sessions["s1"].background_tasks.clone();
+        assert_eq!(kept.len(), BACKGROUND_TASKS_ENDED_MAX + 1);
+        assert!(kept.contains_key("run"));
+        assert!(!kept.contains_key("b004") && kept.contains_key("b005"));
+        assert_eq!(e.sessions["s1"].background.len(), BACKGROUND_TASKS_ENDED_MAX + 1, "the engine forgets them too");
+        // The stream, applied from scratch, ends with the same tasks.
+        let mut replayed = Snapshot::empty(SourceMode::Live);
+        for ev in e.take_events() {
+            replayed.apply(&ev);
+        }
+        assert_eq!(replayed.sessions["s1"].background_tasks, kept);
     }
 
     #[test]

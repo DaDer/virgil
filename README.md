@@ -41,6 +41,8 @@ groups:
 Each row has one line saying where the session stands: its last message, the command it is running, or
 what it is waiting for ("Waiting for 1 agent and 2 background commands"). Background shell commands and
 subagents count as work, so a session that is waiting on a long test run shows as working, not finished.
+The background commands still running are listed under their session, with who started them and for how
+long they have been running.
 
 <p align="center">
   <img src="docs/assets/menu-bar.png" width="640" alt="The menu-bar menu: sessions grouped as needs you, finished, gone quiet and working, each with one line and an age, followed by the keep-awake and notification switches">

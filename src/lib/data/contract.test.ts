@@ -9,6 +9,7 @@ import { describe, expect, test } from 'vitest';
 import type {
   Agent,
   AgentToolHistory,
+  BackgroundTask,
   Problem,
   ToolHistory as ToolHistoryT,
   VirgilEvent,
@@ -55,7 +56,7 @@ const SESSION_INFO = k<SessionInfo>({
 });
 const SESSION = k<Session>({
   ...(Object.fromEntries(SESSION_INFO.map((x) => [x, true])) as Keys<SessionInfo>),
-  agents: true, runs: true, files: true,
+  agents: true, runs: true, files: true, backgroundTasks: true,
 });
 const AGENT = k<Agent>({
   agentId: true, sessionId: true, kind: true, parentAgentId: true, spawnToolUseId: true, spawnDepth: true,
@@ -71,6 +72,10 @@ const RUN = k<WorkflowRun>({
   runId: true, sessionId: true, name: true, summary: true, status: true, final: true, parentAgentId: true,
   toolUseId: true, taskId: true, startedAt: true, endedAt: true, phases: true, agentIds: true, totalTokens: true,
   totalToolCalls: true, declaredAgentCount: true, defaultModel: true, error: true,
+});
+const BACKGROUND_TASK = k<BackgroundTask>({
+  taskId: true, sessionId: true, agentId: true, toolUseId: true, summary: true, status: true, startedAt: true,
+  endedAt: true, outputPath: true,
 });
 const FILE_ENTRY = k<FileEntry>({ path: true, touches: true });
 const FILE_TOUCH = k<FileTouch>({ agentId: true, reads: true, writes: true, firstAt: true, lastAt: true, viaBash: true });
@@ -99,6 +104,7 @@ const EVENT: { [T in VirgilEvent['type']]: string[] } = {
   runStarted: ['run', 'sessionId'],
   runUpdated: ['run', 'sessionId'],
   runFinalized: ['agents', 'run', 'sessionId'],
+  backgroundTaskUpserted: ['sessionId', 'task'],
 };
 
 const keysOf = (o: object) => Object.keys(o).sort();
@@ -118,6 +124,7 @@ function checkSnapshot(s: Snapshot) {
     expect(keysOf(sess)).toEqual(SESSION);
     Object.values(sess.agents).forEach(checkAgent);
     Object.values(sess.runs).forEach(checkRun);
+    for (const b of Object.values(sess.backgroundTasks)) expect(keysOf(b)).toEqual(BACKGROUND_TASK);
     for (const f of Object.values(sess.files)) {
       expect(keysOf(f)).toEqual(FILE_ENTRY);
       for (const t of Object.values(f.touches)) expect(keysOf(t)).toEqual(FILE_TOUCH);
@@ -149,6 +156,7 @@ describe('contract sample from the Rust core', () => {
         case 'toolCallStarted': expect(keysOf(e.call)).toEqual(TOOL_CALL); break;
         case 'runStarted': case 'runUpdated': checkRun(e.run); break;
         case 'runFinalized': checkRun(e.run); e.agents.forEach(checkAgent); break;
+        case 'backgroundTaskUpserted': expect(keysOf(e.task)).toEqual(BACKGROUND_TASK); break;
       }
     }
   });
@@ -161,6 +169,7 @@ describe('contract sample from the Rust core', () => {
     const out = applyEvents(emptySnapshot('replay'), sample.events);
     checkSnapshot(out);
     expect(out).toEqual(sample.snapshot);
+    expect(Object.values(out.sessions).some((s) => Object.keys(s.backgroundTasks).length > 0)).toBe(true);
   });
 
   test('a batch and the status, recording and error payloads match the types', () => {
@@ -176,7 +185,7 @@ describe('contract sample from the Rust core', () => {
   test('the tool history matches the types and holds every call the stream started', () => {
     const h = sample.toolHistory;
     expect(keysOf(h)).toEqual(TOOL_HISTORY);
-    expect(h.seq).toBe(sample.snapshot.seq - 2); // the sample appends two synthetic events after it
+    expect(h.seq).toBe(sample.snapshot.seq - 5); // the sample appends five synthetic events after it
     for (const a of h.agents) {
       expect(keysOf(a)).toEqual(AGENT_TOOL_HISTORY);
       a.calls.forEach((c) => expect(keysOf(c)).toEqual(TOOL_CALL));

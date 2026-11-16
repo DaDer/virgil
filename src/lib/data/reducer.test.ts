@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import type { VirgilEvent, Snapshot } from '../contract';
-import { makeAgent, makeRun, makeSessionInfo } from './factories';
+import { BACKGROUND_TASKS_ENDED_MAX, type BackgroundTask, type VirgilEvent, type Snapshot } from '../contract';
+import { makeAgent, makeBackgroundTask, makeRun, makeSessionInfo } from './factories';
 import { apply, applyEvents, emptySnapshot } from './reducer';
 
 const SID = 's1';
@@ -84,6 +84,29 @@ describe('reducer', () => {
     expect(s.sessions[SID].runs.r.final).toBe(true);
     expect(s.sessions[SID].agents['r#2'].state).toBe('failed');
     expect(s.sessions[SID].agents.w1.state).toBe('done');
+  });
+
+  test('backgroundTaskUpserted replaces the task and keeps only the newest ended ones', () => {
+    let s = base();
+    const task = (taskId: string, p: Partial<BackgroundTask> = {}) =>
+      ev({ type: 'backgroundTaskUpserted', t: 10, sessionId: SID, task: makeBackgroundTask({ taskId, sessionId: SID, startedAt: 10, ...p }) });
+    s = applyEvents(s, [task('run', { summary: 'npm run dev' }), task('b', { agentId: 'a1' })]);
+    expect(Object.keys(s.sessions[SID].backgroundTasks)).toEqual(['run', 'b']);
+    s = apply(s, task('b', { agentId: 'a1', status: 'failed', endedAt: 20, outputPath: '/tmp/b.output' }));
+    expect(s.sessions[SID].backgroundTasks.b).toMatchObject({ status: 'failed', endedAt: 20, outputPath: '/tmp/b.output' });
+    // A session update keeps them.
+    s = apply(s, ev({ type: 'sessionUpserted', t: 30, session: makeSessionInfo({ sessionId: SID, name: 'renamed' }) }));
+    expect(s.sessions[SID].backgroundTasks.b.status).toBe('failed');
+    for (let i = 0; i < BACKGROUND_TASKS_ENDED_MAX; i++) {
+      s = apply(s, task(`e${String(i).padStart(3, '0')}`, { status: 'completed', endedAt: 100 + i }));
+    }
+    const kept = s.sessions[SID].backgroundTasks;
+    expect(Object.keys(kept).length).toBe(BACKGROUND_TASKS_ENDED_MAX + 1);
+    expect(kept.run.status).toBe('running');
+    expect(kept.b).toBeUndefined(); // the oldest ended one
+    expect(kept.e000).toBeDefined();
+    // Unknown sessions are ignored.
+    expect(apply(s, ev({ type: 'backgroundTaskUpserted', t: 40, sessionId: 'nope', task: makeBackgroundTask({ taskId: 'x', sessionId: 'nope' }) })).sessions.nope).toBeUndefined();
   });
 
   test('events naming missing things are ignored', () => {

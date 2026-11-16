@@ -1,9 +1,10 @@
 <script lang="ts">
   // What needs the person now: sessions that asked something, finished, went quiet, or are working,
   // each with one line on where it stands. Fed by the shell's attention list (same as the menu bar).
+  import Duration from '../components/Duration.svelte';
   import RelativeTime from '../components/RelativeTime.svelte';
   import { actions } from '../stores/actions';
-  import { attention, KIND_LABEL, type AttentionItem } from '../stores/attention.svelte';
+  import { attention, KIND_LABEL, UNNAMED_COMMAND, visibleBackground, type AttentionItem } from '../stores/attention.svelte';
   import { world } from '../stores/world.svelte';
 
   function open(i: AttentionItem): void {
@@ -14,7 +15,6 @@
   function extras(i: AttentionItem): string {
     const parts: string[] = [];
     if (i.runningAgents) parts.push(`${i.runningAgents} agent${i.runningAgents === 1 ? '' : 's'}`);
-    if (i.backgroundTasks) parts.push(`${i.backgroundTasks} background command${i.backgroundTasks === 1 ? '' : 's'}`);
     return parts.join(' · ');
   }
 </script>
@@ -54,6 +54,19 @@
                   {#if extras(i)}<span>{extras(i)}</span>{/if}
                   <RelativeTime t={i.since} />
                 </span>
+                {#if i.background?.length}
+                  {@const bg = visibleBackground(i)}
+                  <span class="bg t-small" aria-label="Background commands">
+                    {#each bg.shown as b (b.taskId)}
+                      <span class="cmd">
+                        <span class="cmd-name" class:unnamed={!b.summary.trim()}>{b.summary.trim() || UNNAMED_COMMAND}</span>
+                        {#if b.agentLabel}<span class="cmd-by">by {b.agentLabel}</span>{/if}
+                        <span class="cmd-age">running <Duration from={b.startedAt} /></span>
+                      </span>
+                    {/each}
+                    {#if bg.more}<span class="cmd more">+{bg.more} more background command{bg.more === 1 ? '' : 's'}</span>{/if}
+                  </span>
+                {/if}
               </button>
             </li>
           {/each}
@@ -109,8 +122,16 @@
   .name { font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .line { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .meta { display: inline-flex; gap: var(--space-3); color: var(--text-muted); white-space: nowrap; }
+  .bg { grid-column: 2 / -1; display: flex; flex-direction: column; gap: 2px; min-width: 0; color: var(--text-muted); }
+  .cmd { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+  .cmd::before { content: '↳'; flex: none; }
+  .cmd.more::before { content: none; }
+  .cmd-name { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .cmd-name.unnamed { font-style: italic; color: var(--text-muted); }
+  .cmd-by, .cmd-age { flex: none; white-space: nowrap; }
   @media (max-width: 1100px) {
     .row { grid-template-columns: 104px minmax(0, 1fr) auto; }
     .line { grid-column: 1 / -1; grid-row: 2; }
+    .bg { grid-column: 1 / -1; }
   }
 </style>

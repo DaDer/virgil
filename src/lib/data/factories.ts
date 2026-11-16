@@ -4,6 +4,7 @@ import {
   MAIN_AGENT_ID,
   type Agent,
   type AgentState,
+  type BackgroundTask,
   type Phase,
   type PhaseState,
   type SessionInfo,
@@ -81,6 +82,19 @@ export function makeRun(p: Partial<WorkflowRun> & { runId: string; sessionId: st
     declaredAgentCount: null,
     defaultModel: null,
     error: null,
+    ...p,
+  };
+}
+
+export function makeBackgroundTask(p: Partial<BackgroundTask> & { taskId: string; sessionId: string }): BackgroundTask {
+  return {
+    agentId: MAIN_AGENT_ID,
+    toolUseId: null,
+    summary: '',
+    status: 'running',
+    startedAt: 0,
+    endedAt: null,
+    outputPath: null,
     ...p,
   };
 }

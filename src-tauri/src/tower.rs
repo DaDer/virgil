@@ -19,6 +19,8 @@ pub const FOCUS_CHANNEL: &str = "virgil:focus-session";
 const MAIN_WINDOW: &str = "main";
 const TRAY_ID: &str = "virgil-tray";
 const MENU_LINE_MAX: usize = 64;
+/// Background commands listed under a session row; the rest are counted.
+const MENU_BACKGROUND_MAX: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -114,6 +116,25 @@ fn cut(s: &str, max: usize) -> String {
     let mut out: String = s.chars().take(max - 1).collect();
     out.push('…');
     out
+}
+
+/// Lines for a session's running background commands, shown greyed under its row: the first
+/// [`MENU_BACKGROUND_MAX`], then a count of the rest.
+fn background_lines(i: &AttentionItem, now: i64) -> Vec<String> {
+    let mut lines: Vec<String> = i
+        .background
+        .iter()
+        .take(MENU_BACKGROUND_MAX)
+        .map(|b| {
+            let summary = if b.summary.trim().is_empty() { "Unnamed command" } else { b.summary.as_str() };
+            let by = b.agent_label.as_deref().map(|l| format!(" ({})", cut(l, 24))).unwrap_or_default();
+            format!("      ↳ {}{by}  ·  {}", cut(summary, MENU_LINE_MAX - 8), age(b.started_at, now))
+        })
+        .collect();
+    if i.background.len() > MENU_BACKGROUND_MAX {
+        lines.push(format!("      + {} more background commands", i.background.len() - MENU_BACKGROUND_MAX));
+    }
+    lines
 }
 
 fn heading(kind: AttentionKind) -> &'static str {
@@ -292,7 +313,7 @@ impl Tower {
             "{:?}|{awake}|{:?}|{}",
             g.prefs,
             g.unseen.len(),
-            g.items.iter().map(|i| format!("{}:{:?}:{}:{}", i.session_id, i.kind, i.line, age(i.since, now))).collect::<Vec<_>>().join("|")
+            g.items.iter().map(|i| format!("{}:{:?}:{}:{}:{:?}", i.session_id, i.kind, i.line, age(i.since, now), background_lines(i, now))).collect::<Vec<_>>().join("|")
         );
         if !force && signature == g.menu_signature {
             return;
@@ -349,6 +370,9 @@ fn build_menu(app: &AppHandle, g: &Inner, now: i64) -> tauri::Result<tauri::menu
             let dot = if g.unseen.contains(&i.session_id) { "● " } else { "" };
             let label = format!("{dot}{}  ·  {}  ·  {}", i.name, cut(&i.line, MENU_LINE_MAX), age(i.since, now));
             menu = menu.item(&MenuItemBuilder::with_id(format!("session:{}", i.session_id), label).build(app)?);
+            for (n, line) in background_lines(i, now).into_iter().enumerate() {
+                menu = menu.item(&MenuItemBuilder::with_id(format!("bg:{}:{n}", i.session_id), line).enabled(false).build(app)?);
+            }
         }
     }
     if !any {
@@ -382,6 +406,7 @@ pub fn show_main(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use virgil_core::AttentionBackground;
 
     fn item(id: &str, kind: AttentionKind) -> AttentionItem {
         AttentionItem {
@@ -394,7 +419,41 @@ mod tests {
             line: "where it stands".into(),
             running_agents: 0,
             background_tasks: 0,
+            background: vec![],
         }
+    }
+
+    fn command(task_id: &str, summary: &str, agent_label: Option<&str>, started_at: i64) -> AttentionBackground {
+        AttentionBackground {
+            task_id: task_id.into(),
+            summary: summary.into(),
+            agent_id: agent_label.map_or("main", |_| "a1").into(),
+            agent_label: agent_label.map(str::to_string),
+            started_at,
+        }
+    }
+
+    #[test]
+    fn running_background_commands_are_listed_under_the_session_and_capped() {
+        let mut i = item("a", AttentionKind::Working);
+        assert!(background_lines(&i, 0).is_empty());
+        i.background = vec![
+            command("b1", "Run the tests", None, 0),
+            command("b2", "", Some("Reviewer"), 12 * 60_000),
+            command("b3", "Dev server", None, 20 * 60_000),
+            command("b4", "Watch", None, 25 * 60_000),
+            command("b5", "Lint", None, 25 * 60_000),
+        ];
+        i.background_tasks = 5;
+        assert_eq!(
+            background_lines(&i, 30 * 60_000),
+            vec![
+                "      ↳ Run the tests  ·  30 min",
+                "      ↳ Unnamed command (Reviewer)  ·  18 min",
+                "      ↳ Dev server  ·  10 min",
+                "      + 2 more background commands",
+            ]
+        );
     }
 
     #[test]

@@ -3727,6 +3727,57 @@
     },
     {
       "seq": 128,
+      "sessionId": "11111111-1111-4111-8111-111111111111",
+      "t": 1794650060000,
+      "task": {
+        "agentId": "main",
+        "endedAt": null,
+        "outputPath": null,
+        "sessionId": "11111111-1111-4111-8111-111111111111",
+        "startedAt": 1794650030000,
+        "status": "running",
+        "summary": "Run the test suite",
+        "taskId": "b1",
+        "toolUseId": "toolu_sample_b1"
+      },
+      "type": "backgroundTaskUpserted"
+    },
+    {
+      "seq": 129,
+      "sessionId": "11111111-1111-4111-8111-111111111111",
+      "t": 1794650060000,
+      "task": {
+        "agentId": "a3f1c09d2b7e4a611",
+        "endedAt": 1794650050000,
+        "outputPath": "/tmp/claude-1000/-home-dev-projects-orchard/11111111-1111-4111-8111-111111111111/tasks/b2.output",
+        "sessionId": "11111111-1111-4111-8111-111111111111",
+        "startedAt": 1794650030000,
+        "status": "failed",
+        "summary": "Run the test suite",
+        "taskId": "b2",
+        "toolUseId": "toolu_sample_b2"
+      },
+      "type": "backgroundTaskUpserted"
+    },
+    {
+      "seq": 130,
+      "sessionId": "11111111-1111-4111-8111-111111111111",
+      "t": 1794650060000,
+      "task": {
+        "agentId": "main",
+        "endedAt": 1794650060000,
+        "outputPath": "/tmp/claude-1000/-home-dev-projects-orchard/11111111-1111-4111-8111-111111111111/tasks/b1.output",
+        "sessionId": "11111111-1111-4111-8111-111111111111",
+        "startedAt": 1794650030000,
+        "status": "completed",
+        "summary": "Run the test suite",
+        "taskId": "b1",
+        "toolUseId": "toolu_sample_b1"
+      },
+      "type": "backgroundTaskUpserted"
+    },
+    {
+      "seq": 131,
       "session": {
         "cwd": "/home/dev/projects/orchard",
         "hasTranscript": true,
@@ -3747,7 +3798,7 @@
       "type": "sessionUpserted"
     },
     {
-      "seq": 129,
+      "seq": 132,
       "sessionId": "00000000-0000-4000-8000-00000000dead",
       "t": 1794650060000,
       "type": "sessionRemoved"
@@ -3768,7 +3819,7 @@
   ],
   "snapshot": {
     "mode": "replay",
-    "seq": 129,
+    "seq": 132,
     "sessions": {
       "11111111-1111-4111-8111-111111111111": {
         "agents": {
@@ -4309,6 +4360,30 @@
             "worktreePath": null
           }
         },
+        "backgroundTasks": {
+          "b1": {
+            "agentId": "main",
+            "endedAt": 1794650060000,
+            "outputPath": "/tmp/claude-1000/-home-dev-projects-orchard/11111111-1111-4111-8111-111111111111/tasks/b1.output",
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "startedAt": 1794650030000,
+            "status": "completed",
+            "summary": "Run the test suite",
+            "taskId": "b1",
+            "toolUseId": "toolu_sample_b1"
+          },
+          "b2": {
+            "agentId": "a3f1c09d2b7e4a611",
+            "endedAt": 1794650050000,
+            "outputPath": "/tmp/claude-1000/-home-dev-projects-orchard/11111111-1111-4111-8111-111111111111/tasks/b2.output",
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "startedAt": 1794650030000,
+            "status": "failed",
+            "summary": "Run the test suite",
+            "taskId": "b2",
+            "toolUseId": "toolu_sample_b2"
+          }
+        },
         "cwd": "/home/dev/projects/orchard",
         "files": {
           "/home/dev/projects/orchard/CHANGELOG.md": {
@@ -4591,6 +4666,7 @@
             "worktreePath": null
           }
         },
+        "backgroundTasks": {},
         "cwd": "/home/dev/projects/kiln",
         "files": {},
         "hasTranscript": false,

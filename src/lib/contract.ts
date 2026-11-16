@@ -10,6 +10,8 @@ export type ToolUseId = string;
 
 export const MAIN_AGENT_ID: AgentId = "main";
 export const RECENT_TOOLS_MAX = 8;
+/** Ended background commands kept per session (the newest); running ones are always kept. */
+export const BACKGROUND_TASKS_ENDED_MAX = 100;
 export const EVENT_CHANNEL = "virgil:events";
 export const STATUS_CHANNEL = "virgil:status";
 
@@ -20,6 +22,7 @@ export type AgentKind = "main" | "subagent" | "workflow";
 export type AgentState = "queued" | "running" | "waiting" | "done" | "failed" | "stopped";
 export type RunStatus = "running" | "completed" | "failed" | "stopped";
 export type PhaseState = "pending" | "running" | "done" | "failed";
+export type BackgroundTaskStatus = "running" | "completed" | "failed" | "stopped" | "unknown";
 export type FileOp = "read" | "write";
 export type TouchSource = "tool" | "bash";
 export type SourceMode = "live" | "replay";
@@ -49,6 +52,8 @@ export interface Session extends SessionInfo {
   runs: Record<RunId, WorkflowRun>;
   /** Keyed by normalised absolute path. */
   files: Record<string, FileEntry>;
+  /** Keyed by task id. */
+  backgroundTasks: Record<string, BackgroundTask>;
 }
 
 export interface ToolCall {
@@ -156,6 +161,25 @@ export interface FileEntry {
   touches: Record<AgentId, FileTouch>;
 }
 
+/** A Bash command sent to the background (section 2.8). */
+export interface BackgroundTask {
+  taskId: string;
+  sessionId: SessionId;
+  /** Who started it ("main" for the main thread). */
+  agentId: AgentId;
+  /** The Bash call. */
+  toolUseId: ToolUseId | null;
+  /** The Bash description, else the first line of the command; may be empty. */
+  summary: string;
+  /** "unknown": it ended without a notice (its agent or session ended, or 12 h passed). */
+  status: BackgroundTaskStatus;
+  startedAt: EpochMs;
+  /** null while running. */
+  endedAt: EpochMs | null;
+  /** Where Claude Code wrote its output, from the notice. Only the path; Virgil never reads it. */
+  outputPath: string | null;
+}
+
 export interface Snapshot {
   /** seq of the last event applied; 0 when none. */
   seq: number;
@@ -235,6 +259,12 @@ export interface RunFinalizedEvent extends EventBase {
   /** Every agent of the run, as full replacements. */
   agents: Agent[];
 }
+/** A background command started or changed: a full replacement. */
+export interface BackgroundTaskUpsertedEvent extends EventBase {
+  type: "backgroundTaskUpserted";
+  sessionId: SessionId;
+  task: BackgroundTask;
+}
 
 export type VirgilEvent =
   | SnapshotResetEvent
@@ -247,7 +277,8 @@ export type VirgilEvent =
   | FileTouchedEvent
   | RunStartedEvent
   | RunUpdatedEvent
-  | RunFinalizedEvent;
+  | RunFinalizedEvent
+  | BackgroundTaskUpsertedEvent;
 
 export type VirgilEventType = VirgilEvent["type"];
 

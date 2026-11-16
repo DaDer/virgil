@@ -17,6 +17,7 @@ function session(agents: Agent[], runs: WorkflowRun[] = []): Session {
     agents: all,
     runs: runMap,
     files: {},
+    backgroundTasks: {},
   };
 }
 

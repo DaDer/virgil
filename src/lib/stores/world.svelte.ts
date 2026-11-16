@@ -2,7 +2,7 @@
 // (data-contract 5.2 start-up rule), applied once per animation frame (ux-spec 5.3, rule 6).
 // Views read `world.snapshot` and the helpers; they never talk to the source.
 
-import { MAIN_AGENT_ID, type Agent, type VirgilEvent, type PickedFolder, type RecordingInfo, type Session, type Snapshot, type SourceStatus, type WorkflowRun } from '../contract';
+import { MAIN_AGENT_ID, type Agent, type BackgroundTask, type VirgilEvent, type PickedFolder, type RecordingInfo, type Session, type Snapshot, type SourceStatus, type WorkflowRun } from '../contract';
 import { applyEvents, emptySnapshot } from '../data/reducer';
 import { errorText, type DataSource } from '../data/source';
 import {
@@ -94,6 +94,19 @@ class WorldStore {
     const s = this.session(sessionId);
     if (!s) return null;
     return (runId && s.runs[runId]) || currentRun(s);
+  }
+
+  backgroundTask(sessionId: string | null | undefined, taskId: string | null | undefined): BackgroundTask | null {
+    return (taskId && this.session(sessionId)?.backgroundTasks[taskId]) || null;
+  }
+
+  /** A session's background commands, oldest first (running and ended). */
+  backgroundTasks(sessionId: string | null | undefined): BackgroundTask[] {
+    const s = this.session(sessionId);
+    if (!s) return [];
+    return this.cached(s, 'background', () =>
+      Object.values(s.backgroundTasks ?? {}).sort((a, b) => a.startedAt - b.startedAt || (a.taskId < b.taskId ? -1 : 1)),
+    );
   }
 
   phaseByKey(sessionId: string | null | undefined, key: string) {

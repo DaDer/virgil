@@ -15,5 +15,9 @@ fn main() {
     for i in hub.attention().unwrap_or_default() {
         let mins = (now - i.since) / 60_000;
         println!("{:<9} {:<14} {:>5} min  agents {} bg {}  {}", format!("{:?}", i.kind), i.name, mins, i.running_agents, i.background_tasks, i.line);
+        for b in &i.background {
+            let by = b.agent_label.as_deref().map(|l| format!("  by {l}")).unwrap_or_default();
+            println!("{:<9}   bg {:>5} min  {}{by}", "", (now - b.started_at) / 60_000, if b.summary.is_empty() { "Unnamed command" } else { &b.summary });
+        }
     }
 }

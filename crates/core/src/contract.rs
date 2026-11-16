@@ -9,6 +9,8 @@ pub const MAIN_AGENT_ID: &str = "main";
 pub const RECENT_TOOLS_MAX: usize = 8;
 /// Tool calls kept per agent for `get_tool_history` (oldest dropped first).
 pub const TOOL_HISTORY_MAX: usize = 2000;
+/// Ended background commands kept per session (the newest; running ones are always kept).
+pub const BACKGROUND_TASKS_ENDED_MAX: usize = 100;
 /// Distinct problems kept in `SourceStatus.problems` (oldest dropped first).
 pub const PROBLEMS_MAX: usize = 50;
 pub const EVENT_CHANNEL: &str = "virgil:events";
@@ -27,6 +29,7 @@ string_enum!(pub enum Liveness { Alive, Stale, Unknown });
 string_enum!(pub enum AgentKind { Main, Subagent, Workflow });
 string_enum!(pub enum AgentState { Queued, Running, Waiting, Done, Failed, Stopped });
 string_enum!(pub enum RunStatus { Running, Completed, Failed, Stopped });
+string_enum!(pub enum BackgroundTaskStatus { Running, Completed, Failed, Stopped, Unknown });
 string_enum!(pub enum PhaseState { Pending, Running, Done, Failed });
 string_enum!(pub enum FileOp { Read, Write });
 string_enum!(pub enum TouchSource { Tool, Bash });
@@ -71,6 +74,18 @@ impl PhaseState {
     }
 }
 
+impl BackgroundTaskStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BackgroundTaskStatus::Running => "running",
+            BackgroundTaskStatus::Completed => "completed",
+            BackgroundTaskStatus::Failed => "failed",
+            BackgroundTaskStatus::Stopped => "stopped",
+            BackgroundTaskStatus::Unknown => "unknown",
+        }
+    }
+}
+
 impl Liveness {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -108,6 +123,9 @@ pub struct Session {
     pub agents: BTreeMap<String, Agent>,
     pub runs: BTreeMap<String, WorkflowRun>,
     pub files: BTreeMap<String, FileEntry>,
+    /// Keyed by task id. Absent in snapshots written before it existed.
+    #[serde(default)]
+    pub background_tasks: BTreeMap<String, BackgroundTask>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -215,6 +233,41 @@ pub struct FileEntry {
     pub touches: BTreeMap<String, FileTouch>,
 }
 
+/// A Bash command sent to the background (contract 2.8).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundTask {
+    pub task_id: String,
+    pub session_id: String,
+    /// The agent that started it (`main` for the main thread).
+    pub agent_id: String,
+    /// The Bash call.
+    pub tool_use_id: Option<String>,
+    pub summary: String,
+    pub status: BackgroundTaskStatus,
+    pub started_at: EpochMs,
+    pub ended_at: Option<EpochMs>,
+    /// The notice's `<output-file>`. Only the path; Virgil never reads it.
+    pub output_path: Option<String>,
+}
+
+/// Task ids to drop so that at most [`BACKGROUND_TASKS_ENDED_MAX`] ended tasks remain: the oldest
+/// by end time (start time when there is none), then start time, then id. The engine and the
+/// reducer use the same rule, so they keep the same tasks.
+pub fn ended_tasks_over_cap<'a>(tasks: impl IntoIterator<Item = &'a BackgroundTask>) -> Vec<String> {
+    let mut ended: Vec<(EpochMs, EpochMs, &str)> = tasks
+        .into_iter()
+        .filter(|b| b.status != BackgroundTaskStatus::Running)
+        .map(|b| (b.ended_at.unwrap_or(b.started_at), b.started_at, b.task_id.as_str()))
+        .collect();
+    if ended.len() <= BACKGROUND_TASKS_ENDED_MAX {
+        return Vec::new();
+    }
+    ended.sort();
+    let over = ended.len() - BACKGROUND_TASKS_ENDED_MAX;
+    ended[..over].iter().map(|e| e.2.to_string()).collect()
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
@@ -287,6 +340,11 @@ pub enum EventKind {
         run: Box<WorkflowRun>,
         agents: Vec<Agent>,
     },
+    /// A background command started or changed. Carries the whole task.
+    BackgroundTaskUpserted {
+        session_id: String,
+        task: Box<BackgroundTask>,
+    },
 }
 
 impl EventKind {
@@ -303,6 +361,7 @@ impl EventKind {
             EventKind::RunStarted { .. } => "runStarted",
             EventKind::RunUpdated { .. } => "runUpdated",
             EventKind::RunFinalized { .. } => "runFinalized",
+            EventKind::BackgroundTaskUpserted { .. } => "backgroundTaskUpserted",
         }
     }
 }
@@ -339,6 +398,7 @@ impl Snapshot {
                             agents: BTreeMap::new(),
                             runs: BTreeMap::new(),
                             files: BTreeMap::new(),
+                            background_tasks: BTreeMap::new(),
                         },
                     );
                 }
@@ -423,6 +483,13 @@ impl Snapshot {
                 s.runs.insert(run.run_id.clone(), (**run).clone());
                 for a in agents {
                     s.agents.insert(a.agent_id.clone(), a.clone());
+                }
+            }
+            EventKind::BackgroundTaskUpserted { session_id, task } => {
+                let Some(s) = self.sessions.get_mut(session_id) else { return };
+                s.background_tasks.insert(task.task_id.clone(), (**task).clone());
+                for id in ended_tasks_over_cap(s.background_tasks.values()) {
+                    s.background_tasks.remove(&id);
                 }
             }
         }
@@ -538,6 +605,54 @@ mod tests {
         );
         let back: Event = serde_json::from_value(v).unwrap();
         assert_eq!(back, e);
+    }
+
+    #[test]
+    fn background_tasks_serialise_camel_case_and_keep_the_newest_ended() {
+        let task = |id: &str, status: BackgroundTaskStatus, ended_at: Option<EpochMs>| BackgroundTask {
+            task_id: id.into(),
+            session_id: "s".into(),
+            agent_id: MAIN_AGENT_ID.into(),
+            tool_use_id: Some("toolu_1".into()),
+            summary: "Run the tests".into(),
+            status,
+            started_at: 5,
+            ended_at,
+            output_path: None,
+        };
+        let e = Event {
+            seq: 1,
+            t: 10,
+            kind: EventKind::BackgroundTaskUpserted { session_id: "s".into(), task: Box::new(task("b1", BackgroundTaskStatus::Failed, Some(9))) },
+        };
+        let v = serde_json::to_value(&e).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"seq":1,"t":10,"type":"backgroundTaskUpserted","sessionId":"s","task":{"taskId":"b1","sessionId":"s","agentId":"main","toolUseId":"toolu_1","summary":"Run the tests","status":"failed","startedAt":5,"endedAt":9,"outputPath":null}})
+        );
+        assert_eq!(serde_json::from_value::<Event>(v).unwrap(), e);
+
+        let mut snap = Snapshot::empty(SourceMode::Live);
+        let info: SessionInfo = serde_json::from_value(serde_json::json!({
+            "sessionId": "s", "pid": null, "liveness": "alive", "cwd": null, "projectSlug": null, "name": null, "title": null,
+            "status": null, "kind": null, "version": null, "startedAt": null, "updatedAt": null, "statusUpdatedAt": null,
+            "hasTranscript": true
+        }))
+        .unwrap();
+        let mut seq = 0;
+        let mut apply = |snap: &mut Snapshot, kind: EventKind| {
+            seq += 1;
+            snap.apply(&Event { seq, t: 10, kind });
+        };
+        apply(&mut snap, EventKind::SessionUpserted { session: info });
+        apply(&mut snap, EventKind::BackgroundTaskUpserted { session_id: "s".into(), task: Box::new(task("run", BackgroundTaskStatus::Running, None)) });
+        for i in 0..BACKGROUND_TASKS_ENDED_MAX as i64 + 2 {
+            let t = task(&format!("b{i:03}"), BackgroundTaskStatus::Completed, Some(100 + i));
+            apply(&mut snap, EventKind::BackgroundTaskUpserted { session_id: "s".into(), task: Box::new(t) });
+        }
+        let kept = &snap.sessions["s"].background_tasks;
+        assert_eq!(kept.len(), BACKGROUND_TASKS_ENDED_MAX + 1);
+        assert!(kept.contains_key("run") && !kept.contains_key("b000") && !kept.contains_key("b001") && kept.contains_key("b002"));
     }
 
     #[test]

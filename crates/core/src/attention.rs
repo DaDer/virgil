@@ -3,7 +3,7 @@
 //! [`SessionExtras`]; live mode only. Pure, so the rules can be tested without files.
 
 use crate::contract::{AgentState, EpochMs, Liveness, Session, Snapshot, MAIN_AGENT_ID};
-use crate::engine::SessionExtras;
+use crate::engine::{SessionExtras, BACKGROUND_MAX_MS};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -11,8 +11,6 @@ use std::collections::BTreeMap;
 pub const QUIET_AFTER_MS: i64 = 15 * 60_000;
 /// Finished sessions older than this drop to the idle group.
 pub const FINISHED_FOR_MS: i64 = 24 * 3_600_000;
-/// A background command older than this is assumed to have ended without a notice.
-const BACKGROUND_MAX_MS: i64 = 12 * 3_600_000;
 const LINE_MAX: usize = 140;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
@@ -45,7 +43,24 @@ pub struct AttentionItem {
     /// Where it stands, in one line.
     pub line: String,
     pub running_agents: u32,
+    /// `background.len()`.
     pub background_tasks: u32,
+    /// The background commands still running, oldest first.
+    pub background: Vec<AttentionBackground>,
+}
+
+/// A running background command, listed under its session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttentionBackground {
+    pub task_id: String,
+    /// The call's description, else the first line of its command; can be empty.
+    pub summary: String,
+    /// The agent that started it (`main` for the main thread).
+    pub agent_id: String,
+    /// That agent's label; `None` for the main thread.
+    pub agent_label: Option<String>,
+    pub started_at: EpochMs,
 }
 
 /// Whether the wake lock should be held: something is working.
@@ -74,7 +89,8 @@ fn item(s: &Session, x: &SessionExtras, now: EpochMs) -> AttentionItem {
     let subs: Vec<_> = s.agents.values().filter(|a| a.agent_id != MAIN_AGENT_ID && !a.superseded).collect();
     let running: Vec<_> = subs.iter().filter(|a| matches!(a.state, AgentState::Running | AgentState::Queued)).collect();
     let paused = subs.iter().filter(|a| a.state == AgentState::Waiting && a.state_reason.as_deref() == Some("backgroundWork")).count();
-    let background: Vec<_> = x.background.iter().filter(|b| now - b.started_at < BACKGROUND_MAX_MS).collect();
+    let mut background: Vec<_> = x.background.iter().filter(|b| now - b.started_at < BACKGROUND_MAX_MS).collect();
+    background.sort_by(|a, b| a.started_at.cmp(&b.started_at).then(a.task_id.cmp(&b.task_id)));
     let own_work = running.len() + paused + background.len();
     let last_activity = s.agents.values().filter_map(|a| a.last_activity_at).chain([status_at]).max().unwrap_or(status_at);
     let said = x.last_text.as_deref().map(first_line).filter(|l| !l.is_empty());
@@ -141,6 +157,17 @@ fn item(s: &Session, x: &SessionExtras, now: EpochMs) -> AttentionItem {
         line: cut(&line, LINE_MAX),
         running_agents: (running.len() + paused) as u32,
         background_tasks: background.len() as u32,
+        background: background
+            .iter()
+            .map(|b| AttentionBackground {
+                task_id: b.task_id.clone(),
+                summary: b.summary.clone(),
+                agent_id: b.agent_id.clone(),
+                agent_label: (b.agent_id != MAIN_AGENT_ID)
+                    .then(|| s.agents.get(&b.agent_id).map(|a| a.label.clone()).unwrap_or_else(|| b.agent_id.clone())),
+                started_at: b.started_at,
+            })
+            .collect(),
     }
 }
 
@@ -212,6 +239,10 @@ mod tests {
         item(&s, &x, NOW)
     }
 
+    fn bg(task_id: &str, summary: &str, started_at: EpochMs, agent_id: &str) -> BackgroundTask {
+        BackgroundTask { task_id: task_id.into(), summary: summary.into(), started_at, agent_id: agent_id.into() }
+    }
+
     fn said(text: &str) -> SessionExtras {
         SessionExtras { last_text: Some(text.into()), ..Default::default() }
     }
@@ -229,7 +260,7 @@ mod tests {
     #[test]
     fn idle_with_background_work_is_still_working() {
         let s = session("idle", 40, json!({"main": agent("main", "waiting", None, 40)}));
-        let x = SessionExtras { background: vec![BackgroundTask { summary: "Run the tests".into(), started_at: NOW - 40 * 60_000, agent_id: "main".into() }], ..said("Started the tests.") };
+        let x = SessionExtras { background: vec![bg("b1", "Run the tests", NOW - 40 * 60_000, "main")], ..said("Started the tests.") };
         let i = one(s, x);
         assert_eq!(i.kind, AttentionKind::Working);
         assert_eq!(i.line, "Waiting for 1 background command: Run the tests");
@@ -238,6 +269,24 @@ mod tests {
         let s = session("idle", 5, json!({"main": agent("main", "waiting", None, 5), "a1": agent("a1", "waiting", Some("backgroundWork"), 1), "a2": agent("a2", "done", None, 30)}));
         let i = one(s, SessionExtras::default());
         assert_eq!((i.kind, i.running_agents), (AttentionKind::Working, 1));
+    }
+
+    #[test]
+    fn running_background_commands_are_listed_oldest_first_with_who_started_them() {
+        let s = session("busy", 2, json!({"main": agent("main", "running", None, 1), "a1": agent("a1", "running", None, 1)}));
+        let x = SessionExtras {
+            background: vec![
+                bg("b2", "", NOW - 5 * 60_000, "a1"),
+                bg("b1", "Run the tests", NOW - 30 * 60_000, "main"),
+                bg("b3", "Old server", NOW - 13 * 3_600_000, "main"),
+            ],
+            ..Default::default()
+        };
+        let i = one(s, x);
+        let got: Vec<_> = i.background.iter().map(|b| (b.task_id.as_str(), b.summary.as_str(), b.agent_label.as_deref(), b.started_at)).collect();
+        assert_eq!(got, vec![("b1", "Run the tests", None, NOW - 30 * 60_000), ("b2", "", Some("label a1"), NOW - 5 * 60_000)]);
+        assert_eq!(i.background_tasks, 2);
+        assert_eq!(i.background[1].agent_id, "a1");
     }
 
     #[test]

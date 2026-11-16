@@ -28,7 +28,7 @@ fn contract_sample_covers_every_event_type() {
         v["events"].as_array().unwrap().iter().map(|e| e["type"].as_str().unwrap()).collect();
     for t in [
         "snapshotReset", "sessionUpserted", "sessionRemoved", "agentSpawned", "agentUpdated", "toolCallStarted",
-        "toolCallFinished", "fileTouched", "runStarted", "runUpdated", "runFinalized",
+        "toolCallFinished", "fileTouched", "runStarted", "runUpdated", "runFinalized", "backgroundTaskUpserted",
     ] {
         assert!(types.contains(t), "sample lacks {t}");
     }

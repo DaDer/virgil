@@ -23,8 +23,25 @@ export interface AttentionItem {
   /** Where it stands, in one line. */
   line: string;
   runningAgents: number;
+  /** `background.length`. */
   backgroundTasks: number;
+  /** The background commands still running, oldest first. */
+  background: AttentionBackground[];
 }
+
+/** A running background command, listed under its session. */
+export interface AttentionBackground {
+  taskId: string;
+  /** Can be empty: show {@link UNNAMED_COMMAND}. */
+  summary: string;
+  /** The agent that started it (`main` for the main thread). */
+  agentId: string;
+  /** That agent's label; null for the main thread. */
+  agentLabel: string | null;
+  startedAt: number;
+}
+
+export const UNNAMED_COMMAND = 'Unnamed command';
 
 export interface AttentionPrefs {
   keepAwake: boolean;
@@ -56,12 +73,24 @@ export function groupAttention(items: AttentionItem[]): { kind: AttentionKind; i
   return order.map((kind) => ({ kind, items: items.filter((i) => i.kind === kind) })).filter((g) => g.items.length > 0);
 }
 
+/** Background commands listed under a session in the Now panel; the rest are counted. */
+export const BACKGROUND_SHOWN_MAX = 3;
+
+/** The commands to list under a session, and how many more there are. */
+export function visibleBackground(i: AttentionItem, max = BACKGROUND_SHOWN_MAX): { shown: AttentionBackground[]; more: number } {
+  const all = i.background ?? [];
+  const shown = all.length > max ? all.slice(0, max) : all;
+  return { shown, more: all.length - shown.length };
+}
+
 const QUIET_AFTER_MS = 15 * 60_000;
+/** Same as `BACKGROUND_MAX_MS` in `crates/core/src/engine.rs`. */
+const BACKGROUND_MAX_MS = 12 * 3_600_000;
 const MAIN = 'main';
 
 /**
  * The attention rules for the mock scenario, a simplified copy of `crates/core/src/attention.rs`
- * (no background commands, which the mock does not have). `lines` gives each session's last message.
+ * `lines` gives each session's last message.
  */
 export function deriveDemoAttention(snapshot: Snapshot, now: number, lines: Record<string, string> = {}): AttentionItem[] {
   const order: AttentionKind[] = ['needsYou', 'finished', 'quiet', 'working', 'idle'];
@@ -72,6 +101,17 @@ export function deriveDemoAttention(snapshot: Snapshot, now: number, lines: Reco
     const lastActivity = Math.max(statusAt, ...Object.values(s.agents).map((a) => a.lastActivityAt ?? 0));
     const said = lines[s.sessionId];
     const open = [...(s.agents[MAIN]?.recentTools ?? [])].reverse().find((c) => c.endedAt == null);
+    const background: AttentionBackground[] = Object.values(s.backgroundTasks ?? {})
+      .filter((b) => b.status === 'running' && b.startedAt <= now && now - b.startedAt < BACKGROUND_MAX_MS)
+      .sort((a, b) => a.startedAt - b.startedAt || (a.taskId < b.taskId ? -1 : 1))
+      .map((b) => ({
+        taskId: b.taskId,
+        summary: b.summary,
+        agentId: b.agentId,
+        agentLabel: b.agentId === MAIN ? null : (s.agents[b.agentId]?.label ?? b.agentId),
+        startedAt: b.startedAt,
+      }));
+    const firstCommand = background[0] && (background[0].summary.trim() || 'a command');
     let kind: AttentionKind;
     let since = statusAt;
     let line: string;
@@ -87,12 +127,18 @@ export function deriveDemoAttention(snapshot: Snapshot, now: number, lines: Reco
           ? open.summary
             ? `${open.name}: ${open.summary}`
             : `Running ${open.name}`
-          : 'Thinking';
+          : firstCommand
+            ? `Background command: ${firstCommand}`
+            : 'Thinking';
       kind = now - lastActivity > QUIET_AFTER_MS ? 'quiet' : 'working';
       if (kind === 'quiet') since = lastActivity;
-    } else if (running.length) {
+    } else if (running.length || background.length) {
       kind = 'working';
-      line = `Waiting for ${running.length} agent${running.length === 1 ? '' : 's'}: ${running[0].label}`;
+      const parts = [
+        ...(running.length ? [`${running.length} agent${running.length === 1 ? '' : 's'}`] : []),
+        ...(background.length ? [`${background.length} background command${background.length === 1 ? '' : 's'}`] : []),
+      ];
+      line = `Waiting for ${parts.join(' and ')}: ${running[0]?.label ?? firstCommand}`;
     } else {
       kind = 'finished';
       line = said ?? 'Finished';
@@ -107,7 +153,8 @@ export function deriveDemoAttention(snapshot: Snapshot, now: number, lines: Reco
       since,
       line,
       runningAgents: running.length,
-      backgroundTasks: 0,
+      backgroundTasks: background.length,
+      background,
     };
   };
   return Object.values(snapshot.sessions)

@@ -147,6 +147,12 @@ Surprises:
   second and has `toolUseResult {status: "async_launched", taskType: "local_workflow", taskId, runId,
   workflowName, summary, transcriptDir, scriptPath}`. Here `scriptPath` is always the copy inside the Claude
   dir (`.../workflows/scripts/<workflowName>-<runId>.js`), and `taskId` starts with `w`.
+- `tool_use` with `name: "Bash"` and `input.run_in_background: true` (or a foreground command that Claude
+  Code later sends to the background). The matching user record has `toolUseResult {stdout, stderr,
+  interrupted, isImage, noOutputExpected, backgroundTaskId}`; `backgroundTaskId` is the task id of the
+  command (it starts with `b`) and its presence is what marks a background command. The call's
+  `tool_result` arrives at once; the command's end comes later as a notice (below), or a `tool_use` with
+  `name: "TaskStop"` and input `{task_id}` stops it.
 
 **Completion notices in a transcript** (verified): `queue-operation` records with `operation: "enqueue"`,
 a `timestamp`, and `content` holding a pseudo-XML string:
@@ -155,6 +161,7 @@ a `timestamp`, and `content` holding a pseudo-XML string:
 <task-notification>
 <task-id>a3f1c09d2b7e4a611</task-id>        agentId, or the workflow taskId (w...), or a shell task (b...)
 <tool-use-id>toolu_...</tool-use-id>        the launching tool_use; absent in about a fifth
+<output-file>/private/tmp/.../tasks/b....output</output-file>   shell tasks only: where Claude Code wrote the output
 <status>completed</status>                  completed | failed | killed | stopped; absent on progress notices
 <summary>...</summary> <result>...</result>
 <usage><subagent_tokens>21077</subagent_tokens><tool_uses>3</tool_uses><duration_ms>79900</duration_ms></usage>
@@ -163,7 +170,9 @@ a `timestamp`, and `content` holding a pseudo-XML string:
 
 Workflow notices add `<agent_count>`, `<agents_done>`, `<agents_error>`, `<agents_skipped>` inside `<usage>`.
 The same text appears again in `operation: "remove"` records and inside `attachment` records; read only
-`enqueue`. Extract tags with a tolerant regular expression, not an XML parser. Notices for nested agents
+`enqueue`. A shell task's notice summary reads e.g. `Background command "Run the tests" failed with exit
+code 2`. The core keeps `<output-file>` as a path only and never opens it (the output is private and may be
+large). Extract tags with a tolerant regular expression, not an XML parser. Notices for nested agents
 arrive in the parent agent's transcript as a `user` record with string content starting with
 `<task-notification>` (inferred from the shape). The core reads both forms from every transcript of the
 session and keeps the newest notice per `task-id`, session-wide; such a `user` record is never taken as a
@@ -296,8 +305,9 @@ Snapshot
     │   └── ToolCall   id: toolUseId
     ├── WorkflowRun    id: runId
     │   └── Phase      id: index (1-based, as in the run file)
-    └── FileEntry      id: normalised absolute path
-        └── FileTouch  id: agentId
+    ├── FileEntry      id: normalised absolute path
+    │   └── FileTouch  id: agentId
+    └── BackgroundTask id: taskId (a background Bash command, section 2.8)
 ```
 
 Links:
@@ -510,6 +520,43 @@ Known limit: an agent in a git worktree (`worktreePath`) touches paths under tha
 editing the "same" file in different worktrees have different paths. The UI may strip `worktreePath` to
 compare; the core does not.
 
+### 2.8 BackgroundTask
+
+A Bash command sent to the background (section 1.2): `Session.backgroundTasks[taskId] = {taskId,
+sessionId, agentId, toolUseId, summary, status, startedAt, endedAt, outputPath}`. Tasks are kept after
+they end.
+
+| field | rule |
+|---|---|
+| `taskId` | `toolUseResult.backgroundTaskId` |
+| `agentId` | the agent whose transcript holds the result record (`"main"` for the main thread) |
+| `toolUseId` | the Bash call: the result record's first `tool_result.tool_use_id`, else the notice's `<tool-use-id>`, else `null` |
+| `summary` | the Bash call's summary (section 2.5: `description`, else the first line of `command`); empty when the call is not among the agent's 8 newest |
+| `startedAt` | timestamp of the result record, else the time it was observed |
+| `status`, `endedAt` | rules below |
+| `outputPath` | the notice's `<output-file>`, else `null`. A path only; never read |
+
+Status, first match wins:
+
+1. a notice for `taskId`: `completed` → `completed`; `failed` → `failed`; `killed`, `stopped` →
+   `stopped`; any other or missing status → `unknown`. `endedAt` is the notice's timestamp. A notice
+   replaces an earlier end, including one from `TaskStop`.
+2. a `TaskStop` call with `input.task_id == taskId` → `stopped`, `endedAt` the call's timestamp.
+3. the agent that started it is terminal (section 2.3; for `main` that means the session is `stale`) →
+   `unknown`, `endedAt` that agent's `endedAt` (not earlier than `startedAt`).
+4. session `liveness == "stale"` → `unknown`, `endedAt = startedAt`.
+5. more than 12 hours since `startedAt` by the source's `now` (re-evaluated on every tick, like the quiet
+   rule) → `unknown`, `endedAt = startedAt + 12 h`.
+6. otherwise `running`, `endedAt = null`.
+
+Rules 3 to 5 are derived, not remembered: a revived agent makes its commands `running` again. Files are
+read in no particular order, so an end (rules 1, 2) read before its start is kept and applied when the
+start arrives; an end alone is not a task.
+
+**Retention.** At most 100 ended tasks (status other than `running`) are kept per session: the newest by
+`endedAt`, then `startedAt`, then `taskId`. Running tasks are always kept. The core forgets the others, and
+the reducer (3.3) drops the same ones, so no removal event is needed.
+
 ---
 
 ## 3. Event stream
@@ -554,6 +601,7 @@ Events reach the UI in batches (section 5.2). There is no per-event acknowledgem
 | `runStarted` | `{sessionId, run}` | first sight of a workflow run |
 | `runUpdated` | `{sessionId, run}` | name, status, phases or `agentIds` changed |
 | `runFinalized` | `{sessionId, run, agents}` | the run file was read (section 4, step 9) |
+| `backgroundTaskUpserted` | `{sessionId, task}` | a background command started, or its status, end or any other field changed (section 2.8) |
 
 Examples:
 
@@ -567,7 +615,7 @@ Examples:
 ### 3.3 Snapshot and reducer
 
 `Snapshot = {seq, t, mode, sessions}` where `sessions` maps `sessionId` to a `Session` (the `SessionInfo`
-fields plus `agents`, `runs` and `files` maps). `seq` is the last event applied, 0 when none.
+fields plus `agents`, `runs`, `files` and `backgroundTasks` maps). `seq` is the last event applied, 0 when none.
 
 `apply(s, e)`: first set `s.seq = e.seq` and `s.t = max(s.t, e.t)`. Then, with `S = s.sessions[e.sessionId]`
 (if an event names a session, agent or run that is missing, ignore the event):
@@ -575,7 +623,7 @@ fields plus `agents`, `runs` and `files` maps). `seq` is the last event applied,
 | event | effect |
 |---|---|
 | `snapshotReset` | `s = e.snapshot` (its `seq` equals `e.seq`) |
-| `sessionUpserted` | if missing, insert `{...e.session, agents: {}, runs: {}, files: {}}`; else overwrite the `SessionInfo` fields and keep the three maps |
+| `sessionUpserted` | if missing, insert `{...e.session, agents: {}, runs: {}, files: {}, backgroundTasks: {}}`; else overwrite the `SessionInfo` fields and keep the four maps |
 | `sessionRemoved` | delete the session and everything in it |
 | `agentSpawned` | `S.agents[agent.agentId] = agent`; if `agent.runId` names a run in `S.runs` and its `agentIds` lacks this id, append it |
 | `agentUpdated` | `S.agents[agent.agentId] = agent` (whole object replaced) |
@@ -584,6 +632,7 @@ fields plus `agents`, `runs` and `files` maps). `seq` is the last event applied,
 | `fileTouched` | `F = S.files[path]`, created as `{path, touches: {}}`; `T = F.touches[agentId]`, created as `{agentId, reads: 0, writes: 0, firstAt: e.t, lastAt: e.t, viaBash: false}`; increment `T.reads` or `T.writes` by `op`; `T.firstAt = min(T.firstAt, e.t)`; `T.lastAt = max(T.lastAt, e.t)`; if `source == "bash"` set `T.viaBash = true` |
 | `runStarted`, `runUpdated` | `S.runs[run.runId] = run` (whole object replaced) |
 | `runFinalized` | `S.runs[run.runId] = run`; then for each agent in `agents`: `S.agents[agent.agentId] = agent` |
+| `backgroundTaskUpserted` | `S.backgroundTasks[task.taskId] = task` (whole object replaced); then, while more than 100 tasks have a status other than `running`, delete the oldest of them by `(endedAt ?? startedAt, startedAt, taskId)` (2.8) |
 
 The core emits `agentUpdated` whenever its own copy of an agent differs from what the tool events alone
 would produce: a state change, a text-only message that changes `tokens`, a model that becomes known.
@@ -807,6 +856,8 @@ export type ToolUseId = string;
 
 export const MAIN_AGENT_ID: AgentId = "main";
 export const RECENT_TOOLS_MAX = 8;
+/** Ended background commands kept per session (the newest); running ones are always kept. */
+export const BACKGROUND_TASKS_ENDED_MAX = 100;
 export const EVENT_CHANNEL = "virgil:events";
 export const STATUS_CHANNEL = "virgil:status";
 
@@ -817,6 +868,7 @@ export type AgentKind = "main" | "subagent" | "workflow";
 export type AgentState = "queued" | "running" | "waiting" | "done" | "failed" | "stopped";
 export type RunStatus = "running" | "completed" | "failed" | "stopped";
 export type PhaseState = "pending" | "running" | "done" | "failed";
+export type BackgroundTaskStatus = "running" | "completed" | "failed" | "stopped" | "unknown";
 export type FileOp = "read" | "write";
 export type TouchSource = "tool" | "bash";
 export type SourceMode = "live" | "replay";
@@ -846,6 +898,8 @@ export interface Session extends SessionInfo {
   runs: Record<RunId, WorkflowRun>;
   /** Keyed by normalised absolute path. */
   files: Record<string, FileEntry>;
+  /** Keyed by task id. */
+  backgroundTasks: Record<string, BackgroundTask>;
 }
 
 export interface ToolCall {
@@ -953,6 +1007,25 @@ export interface FileEntry {
   touches: Record<AgentId, FileTouch>;
 }
 
+/** A Bash command sent to the background (section 2.8). */
+export interface BackgroundTask {
+  taskId: string;
+  sessionId: SessionId;
+  /** Who started it ("main" for the main thread). */
+  agentId: AgentId;
+  /** The Bash call. */
+  toolUseId: ToolUseId | null;
+  /** The Bash description, else the first line of the command; may be empty. */
+  summary: string;
+  /** "unknown": it ended without a notice (its agent or session ended, or 12 h passed). */
+  status: BackgroundTaskStatus;
+  startedAt: EpochMs;
+  /** null while running. */
+  endedAt: EpochMs | null;
+  /** Where Claude Code wrote its output, from the notice. Only the path; Virgil never reads it. */
+  outputPath: string | null;
+}
+
 export interface Snapshot {
   /** seq of the last event applied; 0 when none. */
   seq: number;
@@ -1032,6 +1105,12 @@ export interface RunFinalizedEvent extends EventBase {
   /** Every agent of the run, as full replacements. */
   agents: Agent[];
 }
+/** A background command started or changed: a full replacement. */
+export interface BackgroundTaskUpsertedEvent extends EventBase {
+  type: "backgroundTaskUpserted";
+  sessionId: SessionId;
+  task: BackgroundTask;
+}
 
 export type VirgilEvent =
   | SnapshotResetEvent
@@ -1044,7 +1123,8 @@ export type VirgilEvent =
   | FileTouchedEvent
   | RunStartedEvent
   | RunUpdatedEvent
-  | RunFinalizedEvent;
+  | RunFinalizedEvent
+  | BackgroundTaskUpsertedEvent;
 
 export type VirgilEventType = VirgilEvent["type"];
 
@@ -1173,6 +1253,7 @@ use std::collections::BTreeMap;
 pub type EpochMs = i64;
 pub const MAIN_AGENT_ID: &str = "main";
 pub const RECENT_TOOLS_MAX: usize = 8;
+pub const BACKGROUND_TASKS_ENDED_MAX: usize = 100;
 pub const EVENT_CHANNEL: &str = "virgil:events";
 pub const STATUS_CHANNEL: &str = "virgil:status";
 
@@ -1184,6 +1265,7 @@ pub enum AgentKind { Main, Subagent, Workflow }
 pub enum AgentState { Queued, Running, Waiting, Done, Failed, Stopped }
 pub enum RunStatus { Running, Completed, Failed, Stopped }
 pub enum PhaseState { Pending, Running, Done, Failed }
+pub enum BackgroundTaskStatus { Running, Completed, Failed, Stopped, Unknown }
 pub enum FileOp { Read, Write }
 pub enum TouchSource { Tool, Bash }
 pub enum SourceMode { Live, Replay }
@@ -1214,6 +1296,8 @@ pub struct Session {
     pub agents: BTreeMap<String, Agent>,
     pub runs: BTreeMap<String, WorkflowRun>,
     pub files: BTreeMap<String, FileEntry>,
+    #[serde(default)]
+    pub background_tasks: BTreeMap<String, BackgroundTask>,
 }
 
 #[serde(rename_all = "camelCase")]
@@ -1306,6 +1390,19 @@ pub struct FileTouch {
 
 pub struct FileEntry { pub path: String, pub touches: BTreeMap<String, FileTouch> }
 
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundTask {
+    pub task_id: String,
+    pub session_id: String,
+    pub agent_id: String,
+    pub tool_use_id: Option<String>,
+    pub summary: String,
+    pub status: BackgroundTaskStatus,
+    pub started_at: EpochMs,
+    pub ended_at: Option<EpochMs>,
+    pub output_path: Option<String>,
+}
+
 pub struct Snapshot {
     pub seq: u64,
     pub t: EpochMs,
@@ -1336,6 +1433,7 @@ pub enum EventKind {
     RunStarted { session_id: String, run: Box<WorkflowRun> },
     RunUpdated { session_id: String, run: Box<WorkflowRun> },
     RunFinalized { session_id: String, run: Box<WorkflowRun>, agents: Vec<Agent> },
+    BackgroundTaskUpserted { session_id: String, task: Box<BackgroundTask> },
 }
 
 pub struct EventBatch { pub events: Vec<Event> }
@@ -1434,5 +1532,7 @@ Tauri commands in `src-tauri` have the signatures of section 5.1, for example
     `scriptPath` is ever opened, after re-rooting (section 4, step 2).
 11. Main transcripts are large (41 MB observed) with multi-megabyte lines. Skip uninteresting record types
     cheaply, and read stale sessions after live ones.
-12. Transcript text is private. Nothing from it is logged, persisted or copied into the repository; the
+12. A background command's end can be read before its start, and a command whose agent ended without a
+    notice must not stay `running` for ever (section 2.8). Its output file is never read.
+13. Transcript text is private. Nothing from it is logged, persisted or copied into the repository; the
     fixtures are invented.
